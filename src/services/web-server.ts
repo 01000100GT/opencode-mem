@@ -602,6 +602,12 @@ export class WebServer {
           "</head>",
           `<script>window.__OPENCODE_MEM_TOKEN__=${JSON.stringify(token)};</script></head>`
         );
+        if (process.env.OPENCODE_MEM_DIAG === "1") {
+          content = content.replace(
+            "</body>",
+            `<script>window.__OPENCODE_MEM_DIAG__=true;</script></body>`
+          );
+        }
       }
 
       return new Response(content, {

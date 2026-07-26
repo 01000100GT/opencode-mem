@@ -2,7 +2,7 @@ import { embeddingService } from "./embedding.js";
 import { shardManager } from "./sqlite/shard-manager.js";
 import { vectorSearch } from "./sqlite/vector-search.js";
 import { connectionManager } from "./sqlite/connection-manager.js";
-import { log } from "./logger.js";
+import { log, isDiagEnabled, truncateValue, diagLog } from "./logger.js";
 import { CONFIG } from "../config.js";
 import type { MemoryType } from "../types/index.js";
 import { userPromptManager } from "./user-prompt/user-prompt-manager.js";
@@ -86,7 +86,24 @@ const SAFE_HASH_PATTERN = /^[a-zA-Z0-9]+$/;
 function extractScopeFromTag(tag: string): { scope: "project"; hash: string } {
   const parts = tag.split("_");
   const hash = parts.length >= 3 ? parts.slice(2).join("_") : tag;
+
+  if (isDiagEnabled()) {
+    diagLog("api-handlers.ts:extractScopeFromTag", "parsed", {
+      rawTag: tag,
+      hash: truncateValue(hash),
+      scopeHardcoded: "project",
+      hasHashValidation: true,
+      hashValid: SAFE_HASH_PATTERN.test(hash),
+    });
+  }
+
   if (!SAFE_HASH_PATTERN.test(hash)) {
+    if (isDiagEnabled()) {
+      diagLog("api-handlers.ts:extractScopeFromTag", "rejected invalid hash", {
+        rawTag: tag,
+        hash: truncateValue(hash),
+      });
+    }
     throw new Error("Invalid containerTag: hash segment must be alphanumeric");
   }
   return { scope: "project", hash };

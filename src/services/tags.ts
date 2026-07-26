@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { CONFIG } from "../config.js";
 import { normalize, resolve, isAbsolute, basename, dirname, join } from "node:path";
 import { realpathSync, existsSync } from "node:fs";
+import { isDiagEnabled, truncateValue, diagLog, diagWarn } from "./logger.js";
 
 function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex").slice(0, 16);
@@ -62,7 +63,11 @@ export function getGitEmail(): string | null {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return email || null;
-  } catch {
+  } catch (err: unknown) {
+    if (isDiagEnabled()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diagWarn("tags.ts:getGitEmail", "git command failed", { error: msg.substring(0, 200) });
+    }
     return null;
   }
 }
@@ -74,7 +79,11 @@ export function getGitName(): string | null {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return name || null;
-  } catch {
+  } catch (err: unknown) {
+    if (isDiagEnabled()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diagWarn("tags.ts:getGitName", "git command failed", { error: msg.substring(0, 200) });
+    }
     return null;
   }
 }
@@ -87,7 +96,11 @@ export function getGitRepoUrl(directory: string): string | null {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return url || null;
-  } catch {
+  } catch (err: unknown) {
+    if (isDiagEnabled()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diagWarn("tags.ts:getGitRepoUrl", "git command failed", { error: msg.substring(0, 200) });
+    }
     return null;
   }
 }
@@ -113,7 +126,11 @@ export function getGitCommonDir(directory: string): string | null {
     }
 
     return resolved;
-  } catch {
+  } catch (err: unknown) {
+    if (isDiagEnabled()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diagWarn("tags.ts:getGitCommonDir", "git command failed", { error: msg.substring(0, 200) });
+    }
     return null;
   }
 }
@@ -126,7 +143,11 @@ export function getGitTopLevel(directory: string): string | null {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return topLevel || null;
-  } catch {
+  } catch (err: unknown) {
+    if (isDiagEnabled()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diagWarn("tags.ts:getGitTopLevel", "git command failed", { error: msg.substring(0, 200) });
+    }
     return null;
   }
 }
@@ -181,8 +202,16 @@ export function getUserTagInfo(): TagInfo {
   const name = CONFIG.userNameOverride || getGitName();
 
   if (email) {
+    const tag = `${CONFIG.containerTagPrefix}_user_${sha256(email)}`;
+    if (isDiagEnabled()) {
+      diagLog("tags.ts:getUserTagInfo", "generated email-based tag", {
+        prefix: CONFIG.containerTagPrefix,
+        tag: truncateValue(tag),
+        email: email ? truncateValue(email) : "none",
+      });
+    }
     return {
-      tag: `${CONFIG.containerTagPrefix}_user_${sha256(email)}`,
+      tag,
       displayName: name || email,
       userName: name || undefined,
       userEmail: email,
@@ -190,8 +219,16 @@ export function getUserTagInfo(): TagInfo {
   }
 
   const fallback = name || process.env.USER || process.env.USERNAME || "anonymous";
+  const tag = `${CONFIG.containerTagPrefix}_user_${sha256(fallback)}`;
+  if (isDiagEnabled()) {
+    diagLog("tags.ts:getUserTagInfo", "generated fallback tag", {
+      prefix: CONFIG.containerTagPrefix,
+      tag: truncateValue(tag),
+      fallback,
+    });
+  }
   return {
-    tag: `${CONFIG.containerTagPrefix}_user_${sha256(fallback)}`,
+    tag,
     displayName: fallback,
     userName: fallback,
     userEmail: undefined,
@@ -210,8 +247,19 @@ export function getProjectTagInfo(directory: string): TagInfo {
   const gitRepoUrl = markerRoot ? null : getGitRepoUrl(directory);
   const projectIdentity = markerRoot ? `path:${markerRoot}` : getGitProjectIdentity(projectRoot);
 
+  const tag = `${CONFIG.containerTagPrefix}_project_${sha256(projectIdentity)}`;
+
+  if (isDiagEnabled()) {
+    diagLog("tags.ts:getProjectTagInfo", "generated project tag", {
+      prefix: CONFIG.containerTagPrefix,
+      tag: truncateValue(tag),
+      projectRoot,
+      markerDetected: !!markerRoot,
+    });
+  }
+
   return {
-    tag: `${CONFIG.containerTagPrefix}_project_${sha256(projectIdentity)}`,
+    tag,
     displayName: projectRoot,
     projectPath: projectRoot,
     projectName,

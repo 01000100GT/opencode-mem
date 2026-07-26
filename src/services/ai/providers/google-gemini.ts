@@ -1,7 +1,7 @@
 import { BaseAIProvider, type ToolCallResult } from "./base-provider.js";
 import { AISessionManager } from "../session/ai-session-manager.js";
 import type { ChatCompletionTool } from "../tools/tool-schema.js";
-import { log } from "../../logger.js";
+import { log, isDiagEnabled, diagLog, diagAlert } from "../../logger.js";
 import { UserProfileValidator } from "../validators/user-profile-validator.js";
 
 /**
@@ -153,6 +153,16 @@ export class GoogleGeminiProvider extends BaseAIProvider {
         const baseUrl = this.config.apiUrl || "https://generativelanguage.googleapis.com/v1beta";
         const url = `${baseUrl}/models/${this.config.model}:generateContent?key=${this.config.apiKey}`;
 
+        if (isDiagEnabled()) {
+          const redactedUrl = url.replace(/key=[^&]+/, "key=REDACTED");
+          diagLog("google-gemini.ts:fetch", "Gemini API request", {
+            url: redactedUrl,
+            model: this.config.model,
+            keyInQueryString: true,
+            headersPresent: ["Content-Type"],
+          });
+        }
+
         const requestBody: any = {
           contents,
           systemInstruction: geminiSystemInstruction,
@@ -186,6 +196,22 @@ export class GoogleGeminiProvider extends BaseAIProvider {
             error: errorText,
             iteration: iterations,
           });
+
+          if (isDiagEnabled() && this.config.apiKey) {
+            const apiKey = this.config.apiKey;
+            if (errorText.includes(apiKey)) {
+              diagAlert(
+                "google-gemini.ts:errorHandler",
+                "Gemini API key detected in error response body"
+              );
+            } else {
+              diagLog(
+                "google-gemini.ts:errorHandler",
+                "error response body verified — no key leakage"
+              );
+            }
+          }
+
           return {
             success: false,
             error: `Gemini API error: ${response.status} - ${errorText}`,
@@ -194,6 +220,16 @@ export class GoogleGeminiProvider extends BaseAIProvider {
         }
 
         const data = (await response.json()) as any;
+
+        if (isDiagEnabled() && this.config.apiKey) {
+          const responseStr = JSON.stringify(data);
+          if (responseStr.includes(this.config.apiKey)) {
+            diagAlert("google-gemini.ts:onSuccess", "Gemini API key detected in response body");
+          } else {
+            diagLog("google-gemini.ts:onSuccess", "response body verified — no key leakage");
+          }
+        }
+
         const candidate = data.candidates?.[0];
 
         if (!candidate || !candidate.content) {

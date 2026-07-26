@@ -72,7 +72,10 @@ function rotateLog() {
     }
 
     cleanupOldLogs();
-  } catch {}
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[opencode-mem] rotateLog failed: ${msg}\n`);
+  }
 }
 
 function getArchiveDate(stats: { mtime: Date }): string {
@@ -95,7 +98,10 @@ function cleanupOldLogs() {
         unlinkSync(join(logDir, file));
       }
     }
-  } catch {}
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[opencode-mem] cleanupOldLogs failed: ${msg}\n`);
+  }
 }
 
 function ensureLoggerInitialized() {
@@ -127,4 +133,42 @@ export function log(message: string, data?: unknown) {
     ? `[${timestamp}] ${message}: ${JSON.stringify(data)}\n`
     : `[${timestamp}] ${message}\n`;
   appendFileSync(logFile, line);
+}
+
+const DIAG_LOGGED_PATHS_KEY = Symbol.for("opencode-mem.diag.loggedPaths");
+
+export function isDiagEnabled(): boolean {
+  return process.env.OPENCODE_MEM_DIAG === "1";
+}
+
+export function truncateValue(value: string): string {
+  if (value.length <= 8) return value;
+  return value.slice(0, 8) + "...";
+}
+
+export function diagLog(location: string, message: string, data?: unknown) {
+  if (!isDiagEnabled()) return;
+
+  const loggedPaths: Set<string> = (globalThis as any)[DIAG_LOGGED_PATHS_KEY] || new Set();
+  (globalThis as any)[DIAG_LOGGED_PATHS_KEY] = loggedPaths;
+
+  const key = `${location}:${message}`;
+  if (loggedPaths.has(key)) return;
+  loggedPaths.add(key);
+
+  log(`[DIAG] ${location} ${message}`, data);
+}
+
+export function diagLogOnce(location: string, message: string, data?: unknown) {
+  diagLog(location, message, data);
+}
+
+export function diagWarn(location: string, message: string, data?: unknown) {
+  if (!isDiagEnabled()) return;
+  log(`[DIAG:WARN] ${location} ${message}`, data);
+}
+
+export function diagAlert(location: string, message: string, data?: unknown) {
+  if (!isDiagEnabled()) return;
+  log(`[DIAG:ALERT] ${location} ${message}`, data);
 }

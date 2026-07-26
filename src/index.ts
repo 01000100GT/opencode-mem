@@ -12,8 +12,8 @@ import { userPromptManager } from "./services/user-prompt/user-prompt-manager.js
 import { startWebServer, WebServer } from "./services/web-server.js";
 import { WebAuth } from "./services/web-auth.js";
 
-import { isConfigured, CONFIG, initConfig } from "./config.js";
-import { log } from "./services/logger.js";
+import { isConfigured, CONFIG, initConfig, getAutoCaptureProviderStatus } from "./config.js";
+import { log, isDiagEnabled, diagLog } from "./services/logger.js";
 import type { MemoryType } from "./types/index.js";
 import { getLanguageName } from "./services/language-detector.js";
 import type { MemoryScope } from "./services/client.js";
@@ -72,12 +72,28 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   let webServer: WebServer | null = null;
   let idleTimeout: Timer | null = null;
 
+  if (isDiagEnabled()) {
+    const providerStatus = getAutoCaptureProviderStatus(CONFIG);
+    diagLog("index.ts:pluginEntry", "plugin readiness", {
+      isConfigured: isConfigured(),
+      autoCaptureReady: providerStatus.ready,
+      autoCaptureIssues: providerStatus.issues,
+      mismatch: isConfigured() !== providerStatus.ready,
+    });
+  }
+
   if (!isConfigured()) {
+    if (isDiagEnabled()) {
+      diagLog("index.ts:75", "isConfigured false — empty block (dead code)");
+    }
   }
 
   const GLOBAL_PLUGIN_WARMUP_KEY = Symbol.for("opencode-mem.plugin.warmedup");
 
   if (!(globalThis as any)[GLOBAL_PLUGIN_WARMUP_KEY] && isConfigured()) {
+    if (isDiagEnabled()) {
+      diagLog("index.ts:93", "warmup guard — isConfigured always true so always passes");
+    }
     // Fire-and-forget: warmup is slow (embedding model load + index rebuild).
     // Awaiting it here serializes opencode's plugin loader and starves the TUI,
     // which gave the symptom "opencode hangs ~70s then disconnects on startup".
@@ -218,7 +234,19 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
 
   return {
     "chat.message": async (input, output) => {
-      if (!isConfigured() || !CONFIG.chatMessage.enabled) return;
+      if (!isConfigured() || !CONFIG.chatMessage.enabled) {
+        if (isDiagEnabled()) {
+          diagLog(
+            "index.ts:237",
+            "chat.message guard — isConfigured always true, actual gate: CONFIG.chatMessage.enabled",
+            {
+              isConfigured: isConfigured(),
+              chatMessageEnabled: CONFIG.chatMessage.enabled,
+            }
+          );
+        }
+        return;
+      }
 
       try {
         const textParts = output.parts.filter(
@@ -320,7 +348,19 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
     },
 
     "chat.params": async (input) => {
-      if (!isConfigured() || CONFIG.opencodeModel !== "inherit") return;
+      if (!isConfigured() || CONFIG.opencodeModel !== "inherit") {
+        if (isDiagEnabled()) {
+          diagLog(
+            "index.ts:347",
+            "chat.params guard — isConfigured always true, actual gate: CONFIG.opencodeModel !== inherit",
+            {
+              isConfigured: isConfigured(),
+              opencodeModel: CONFIG.opencodeModel,
+            }
+          );
+        }
+        return;
+      }
 
       try {
         userPromptManager.setPromptModel(input.message.id, input.model.providerID, input.model.id);
@@ -353,6 +393,12 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
           scope?: MemoryScope;
         }) {
           if (!isConfigured()) {
+            if (isDiagEnabled()) {
+              diagLog(
+                "index.ts:387",
+                "tool memory guard — isConfigured never false so guard is unreachable"
+              );
+            }
             return JSON.stringify({
               success: false,
               error: "Memory system not configured properly.",
@@ -569,7 +615,19 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
     event: async (input: { event: { type: string; properties?: any } }) => {
       const event = input.event;
       if (event.type === "session.idle") {
-        if (!isConfigured() || !CONFIG.autoCaptureEnabled) return;
+        if (!isConfigured() || !CONFIG.autoCaptureEnabled) {
+          if (isDiagEnabled()) {
+            diagLog(
+              "index.ts:607",
+              "session.idle guard — isConfigured always true, actual gate: CONFIG.autoCaptureEnabled",
+              {
+                isConfigured: isConfigured(),
+                autoCaptureEnabled: CONFIG.autoCaptureEnabled,
+              }
+            );
+          }
+          return;
+        }
         const sessionID = event.properties?.sessionID;
         if (!sessionID) return;
 
@@ -595,7 +653,19 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
       }
 
       if (event.type === "session.compacted") {
-        if (!isConfigured() || !CONFIG.compaction.enabled) return;
+        if (!isConfigured() || !CONFIG.compaction.enabled) {
+          if (isDiagEnabled()) {
+            diagLog(
+              "index.ts:641",
+              "session.compacted guard — isConfigured always true, actual gate: CONFIG.compaction.enabled",
+              {
+                isConfigured: isConfigured(),
+                compactionEnabled: CONFIG.compaction.enabled,
+              }
+            );
+          }
+          return;
+        }
 
         const sessionID = event.properties?.sessionID;
         if (!sessionID) return;

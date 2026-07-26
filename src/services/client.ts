@@ -3,7 +3,7 @@ import { shardManager } from "./sqlite/shard-manager.js";
 import { vectorSearch } from "./sqlite/vector-search.js";
 import { connectionManager } from "./sqlite/connection-manager.js";
 import { CONFIG } from "../config.js";
-import { log } from "./logger.js";
+import { log, isDiagEnabled, truncateValue, diagLog, diagWarn } from "./logger.js";
 import type { MemoryType } from "../types/index.js";
 import type { MemoryRecord } from "./sqlite/types.js";
 
@@ -49,8 +49,43 @@ function extractScopeFromContainerTag(containerTag: string): {
   if (parts.length >= 3) {
     const scope = parts[1] as "user" | "project";
     const hash = parts.slice(2).join("_");
+
+    if (isDiagEnabled()) {
+      const hasValidScope = scope === "user" || scope === "project";
+      const hasAlphaHash = /^[a-zA-Z0-9]+$/.test(hash);
+      if (!hasValidScope) {
+        diagWarn("client.ts:extractScopeFromContainerTag", "parsed scope not user/project", {
+          rawTag: containerTag,
+          parsedScope: scope,
+          hash: truncateValue(hash),
+          parts,
+        });
+      }
+      if (!hasAlphaHash) {
+        diagWarn("client.ts:extractScopeFromContainerTag", "hash segment non-alphanumeric", {
+          rawTag: containerTag,
+          scope,
+          hash: truncateValue(hash),
+        });
+      }
+      diagLog("client.ts:extractScopeFromContainerTag", "parsed", {
+        rawTag: containerTag,
+        scope,
+        hash: truncateValue(hash),
+        hasNoHashValidation: true,
+      });
+    }
+
     return { scope, hash };
   }
+
+  if (isDiagEnabled()) {
+    diagWarn("client.ts:extractScopeFromContainerTag", "fallback: fewer than 3 parts", {
+      rawTag: containerTag,
+      fallbackHash: truncateValue(containerTag),
+    });
+  }
+
   return { scope: "user", hash: containerTag };
 }
 

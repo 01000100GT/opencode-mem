@@ -1,7 +1,7 @@
 import type { PluginInput } from "@opencode-ai/plugin";
 import { memoryClient } from "./client.js";
 import { getTags } from "./tags.js";
-import { log } from "./logger.js";
+import { log, isDiagEnabled, diagWarn } from "./logger.js";
 import { CONFIG } from "../config.js";
 import { userPromptManager, type UserPrompt } from "./user-prompt/user-prompt-manager.js";
 import { loadOpencodeProvider } from "./ai/opencode-provider-loader.js";
@@ -288,7 +288,14 @@ async function getLatestProjectMemory(containerTag: string): Promise<string | nu
     }
 
     return content.substring(0, 500) + "...";
-  } catch {
+  } catch (err: unknown) {
+    if (isDiagEnabled()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      diagWarn("auto-capture.ts:getLatestProjectMemory", "catch triggered", {
+        containerTag,
+        error: msg.substring(0, 200),
+      });
+    }
     return null;
   }
 }

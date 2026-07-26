@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { stripJsoncComments } from "./services/jsonc.js";
 import { resolveSecretValue } from "./services/secret-resolver.js";
 import { isPlaceholderApiKey } from "./services/ai/api-key-placeholder.js";
+import { isDiagEnabled, truncateValue, diagLog, diagWarn } from "./services/logger.js";
 
 const CONFIG_DIR = join(homedir(), ".config", "opencode");
 const DATA_DIR = join(homedir(), ".opencode-mem");
@@ -214,9 +215,29 @@ function loadConfigFromPaths(paths: string[]): OpenCodeMemConfig {
       try {
         const content = readFileSync(path, "utf-8");
         const json = stripJsoncComments(content);
-        return JSON.parse(json) as OpenCodeMemConfig;
-      } catch {}
+        const parsed = JSON.parse(json) as OpenCodeMemConfig;
+
+        if (isDiagEnabled()) {
+          const keys = Object.keys(parsed).length;
+          diagLog("config.ts:loadConfigFromPaths", "loaded", { path, keys });
+        }
+
+        return parsed;
+      } catch (err: unknown) {
+        if (isDiagEnabled()) {
+          const msg = err instanceof Error ? err.message : String(err);
+          diagWarn("config.ts:loadConfigFromPaths", "parse failed — silently swallowed", {
+            path,
+            error: msg.substring(0, 200),
+          });
+        }
+      }
+    } else if (isDiagEnabled()) {
+      diagLog("config.ts:loadConfigFromPaths", "file not found", { path });
     }
+  }
+  if (isDiagEnabled()) {
+    diagLog("config.ts:loadConfigFromPaths", "no config files found — returning empty");
   }
   return {};
 }
@@ -509,7 +530,18 @@ function ensureConfigExists(): void {
       writeFileSync(configPath, CONFIG_TEMPLATE, "utf-8");
       console.log(`\n✓ Created config template: ${configPath}`);
       console.log("  Edit this file to customize opencode-mem settings.\n");
-    } catch {}
+      if (isDiagEnabled()) {
+        diagLog("config.ts:ensureConfigExists", "template written", { path: configPath });
+      }
+    } catch (err: unknown) {
+      if (isDiagEnabled()) {
+        const msg = err instanceof Error ? err.message : String(err);
+        diagWarn("config.ts:ensureConfigExists", "template write failed — silently swallowed", {
+          path: configPath,
+          error: msg.substring(0, 200),
+        });
+      }
+    }
   }
 }
 
@@ -750,8 +782,24 @@ export function initConfig(directory: string): void {
   const projectConfig = loadConfigFromPaths(projectPaths);
   const merged: OpenCodeMemConfig = { ...globalConfig, ...projectConfig };
   CONFIG = buildConfig(merged);
+
+  if (isDiagEnabled()) {
+    diagLog("config.ts:initConfig", "merged config", {
+      directory,
+      globalKeys: Object.keys(globalConfig).length,
+      projectKeys: Object.keys(projectConfig).length,
+      storagePath: CONFIG.storagePath,
+      containerTagPrefix: CONFIG.containerTagPrefix,
+      autoCaptureEnabled: CONFIG.autoCaptureEnabled,
+    });
+  }
 }
 
 export function isConfigured(): boolean {
+  if (isDiagEnabled()) {
+    diagLog("config.ts:isConfigured", "always returns true (stub)", {
+      autoCaptureProviderStatus: getAutoCaptureProviderStatus(CONFIG),
+    });
+  }
   return true;
 }

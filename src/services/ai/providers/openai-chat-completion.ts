@@ -7,7 +7,7 @@ import {
 import type { AISessionManager } from "../session/ai-session-manager.js";
 import type { AIMessage } from "../session/session-types.js";
 import type { ChatCompletionTool } from "../tools/tool-schema.js";
-import { log } from "../../logger.js";
+import { log, isDiagEnabled, diagWarn } from "../../logger.js";
 import { UserProfileValidator } from "../validators/user-profile-validator.js";
 
 interface ToolCallResponse {
@@ -83,6 +83,14 @@ function extractFirstJSON(raw: string): string | null {
     }
   }
   return null;
+}
+
+function stripXmlTags(raw: string): string {
+  let result = raw.replace(/<\/?[a-zA-Z_]\w*(?:\s[^>]*)?>/g, "");
+  result = result.replace(/\\n<\/\w+/g, "");
+  result = result.replace(/<\/\w+(?=")/g, "");
+  result = result.replace(/(\w)"(\w)/g, '$1\\"$2');
+  return result;
 }
 
 function repairInnerQuotes(json: string): string {
@@ -302,7 +310,15 @@ export class OpenAIChatCompletionProvider extends BaseAIProvider {
           };
         }
 
-        const data: unknown = await response.json();
+        let rawText = await response.text();
+        const lastBrace = rawText.lastIndexOf("}");
+        if (lastBrace !== -1) {
+          const afterBrace = rawText.substring(lastBrace + 1).trim();
+          if (afterBrace.startsWith("data:")) {
+            rawText = rawText.substring(0, lastBrace + 1);
+          }
+        }
+        const data: unknown = JSON.parse(rawText);
 
         if (isErrorResponseBody(data)) {
           log("API returned error in response body", {
@@ -385,11 +401,44 @@ export class OpenAIChatCompletionProvider extends BaseAIProvider {
                       try {
                         return JSON.parse(fixed);
                       } catch {
-                        const repaired = repairInnerQuotes(fixed);
-                        if (repaired !== fixed) {
+                        if (isDiagEnabled()) {
+                          diagWarn(
+                            "openai-chat-completion.ts:387",
+                            "extractFirstJSON parse failed, trying repairInnerQuotes"
+                          );
+                        }
+                        const stripped = stripXmlTags(fixed);
+                        if (stripped !== fixed) {
+                          try {
+                            return JSON.parse(stripped);
+                          } catch {
+                            if (isDiagEnabled()) {
+                              diagWarn(
+                                "openai-chat-completion.ts:389",
+                                "stripXmlTags parse failed, trying repairInnerQuotes",
+                                {
+                                  original: fixed.slice(0, 200),
+                                  stripped: stripped.slice(0, 200),
+                                }
+                              );
+                            }
+                          }
+                        }
+                        const repaired = repairInnerQuotes(stripped !== fixed ? stripped : fixed);
+                        if (repaired !== (stripped !== fixed ? stripped : fixed)) {
                           try {
                             return JSON.parse(repaired);
-                          } catch {}
+                          } catch {
+                            if (isDiagEnabled()) {
+                              diagWarn(
+                                "openai-chat-completion.ts:402",
+                                "JSON repair chain exhausted",
+                                {
+                                  repairStrategy: "repairInnerQuotes failed",
+                                }
+                              );
+                            }
+                          }
                         }
                       }
                     }

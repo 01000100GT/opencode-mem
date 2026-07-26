@@ -3,7 +3,7 @@ import { connectionManager } from "./sqlite/connection-manager.js";
 import { vectorSearch } from "./sqlite/vector-search.js";
 import { embeddingService } from "./embedding.js";
 import { CONFIG } from "../config.js";
-import { log } from "./logger.js";
+import { log, isDiagEnabled, truncateValue, diagLog } from "./logger.js";
 
 export interface DimensionMismatch {
   needsMigration: boolean;
@@ -256,7 +256,24 @@ export class MigrationService {
 
             const scope = memory.containerTag.includes("_user_") ? "user" : "project";
             const hash = memory.containerTag.split("_").slice(2).join("_");
+
+            if (isDiagEnabled()) {
+              diagLog("migration-service.ts:reEmbed", "parsed", {
+                rawTag: memory.containerTag,
+                scope,
+                scopeDetection: "includes('_user_')",
+                hash: truncateValue(hash),
+                hasHashValidation: true,
+              });
+            }
+
             if (!/^[a-zA-Z0-9]+$/.test(hash)) {
+              if (isDiagEnabled()) {
+                diagLog("migration-service.ts:reEmbed", "rejected invalid hash", {
+                  rawTag: memory.containerTag,
+                  hash: truncateValue(hash),
+                });
+              }
               throw new Error("Invalid containerTag: hash segment must be alphanumeric");
             }
             const newShard = shardManager.getWriteShard(scope, hash);

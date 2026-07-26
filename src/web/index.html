@@ -398,5 +398,50 @@
     </div>
 
     <script src="/app.js"></script>
+    <script>
+      if (window.__OPENCODE_MEM_DIAG__) {
+        console.log("[DIAG] CDN script audit starting...");
+        var scripts = document.querySelectorAll("script[src]");
+        scripts.forEach(function (s) {
+          if (s.src.startsWith("http")) {
+            console.log(
+              "[DIAG] CDN script: src=" +
+                s.src +
+                " integrity=" +
+                (s.getAttribute("integrity") || "(none)") +
+                " crossorigin=" +
+                (s.getAttribute("crossorigin") || "(none)")
+            );
+          }
+        });
+        if (window.lucide) {
+          console.log("[DIAG] lucide global available (version detection not available)");
+        } else {
+          console.warn("[DIAG:WARN] lucide not loaded on window");
+        }
+        if (window.jsonrepair) {
+          console.log("[DIAG] jsonrepair global available (version detection not available)");
+        } else {
+          console.warn("[DIAG:WARN] jsonrepair not loaded on window");
+        }
+        if (window.marked) {
+          console.log("[DIAG] marked v" + (window.marked.version || "unknown") + " loaded");
+        } else {
+          console.warn("[DIAG:WARN] marked not loaded on window");
+        }
+        if (window.DOMPurify) {
+          console.log("[DIAG] DOMPurify v" + (window.DOMPurify.version || "unknown") + " loaded");
+        } else {
+          console.warn("[DIAG:WARN] DOMPurify not loaded on window");
+        }
+        var missingIntegrity = document.querySelectorAll("script[src^='http']:not([integrity])");
+        if (missingIntegrity.length > 0) {
+          console.warn(
+            "[DIAG:WARN] " + missingIntegrity.length + " CDN script(s) missing integrity attribute"
+          );
+        }
+        console.log("[DIAG] CDN script audit complete");
+      }
+    </script>
   </body>
 </html>
