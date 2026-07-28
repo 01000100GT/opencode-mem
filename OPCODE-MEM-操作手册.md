@@ -2,7 +2,7 @@
 
 > 适用版本：`opencode-mem 2.20.1` 当前 `modify_test` 工作树  
 > 文档依据：当前源码与未提交改动，不代表上游已发布版本  
-> 最后核对：2026-07-26
+> 最后核对：2026-07-28
 
 ## 1. 项目概览
 
@@ -23,16 +23,24 @@
 
 ### 2.1 诊断日志框架
 
-`src/services/logger.ts:138-174` 新增：
+`src/services/logger.ts:138-155` 新增：
 
-| API               | 行为                                           |
-| ----------------- | ---------------------------------------------- |
-| `isDiagEnabled()` | 仅当 `OPENCODE_MEM_DIAG=1` 时返回 `true`       |
-| `truncateValue()` | 超过 8 个字符时保留前 8 个字符                 |
-| `diagLog()`       | 同一进程内，同一 `location + message` 只写一次 |
-| `diagLogOnce()`   | 当前是 `diagLog()` 的别名                      |
-| `diagWarn()`      | 每次调用都记录诊断警告                         |
-| `diagAlert()`     | 每次调用都记录高优先级诊断告警                 |
+| API                   | 行为                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| `isDiagEnabled()`     | 配置文件 `diag: true` 或环境变量 `OPENCODE_MEM_DIAG=1`，任一为 true 即启用                 |
+| `setDiagFromConfig()` | 由 `config.ts` 在 `initConfig` 时调用，把 `opencode-mem.jsonc` 的 `diag` 字段注入到 logger |
+| `truncateValue()`     | 超过 8 个字符时保留前 8 个字符                                                             |
+| `diagLog()`           | 同一进程内，同一 `location + message` 只写一次                                             |
+| `diagLogOnce()`       | 当前是 `diagLog()` 的别名                                                                  |
+| `diagWarn()`          | 每次调用都记录诊断警告                                                                     |
+| `diagAlert()`         | 每次调用都记录高优先级诊断告警                                                             |
+
+诊断开关现在有两种启用方式，**任一为 true 即启用**：
+
+1. 配置文件 `diag: true`（`~/.config/opencode/opencode-mem.jsonc` 或项目级 `.opencode/opencode-mem.jsonc`），在 `initConfig()` 完成后生效，见 `src/config.ts:863-865`。
+2. 环境变量 `OPENCODE_MEM_DIAG=1`，在整个进程生命周期内有效，特别适合配置加载前的早期启动阶段或临时调试。
+
+两者互不覆盖：即使配置文件设为 `false`，环境变量 `OPENCODE_MEM_DIAG=1` 仍能开启诊断。两者都未设置时 `isDiagEnabled()` 返回 `false`。
 
 普通日志路径由 `OPENCODE_MEM_LOG_FILE` 控制；未设置时使用 `~/.opencode-mem/opencode-mem.log`，见 `src/services/logger.ts:14-16`。
 
@@ -329,12 +337,32 @@ http://127.0.0.1:4747
 
 ### 7.3 启用诊断
 
-必须在启动 OpenCode 之前设置环境变量：
+支持两种方式，**任一为 true 即启用**，互不覆盖。
+
+**方式一：配置文件（持久生效）**
+
+在 `~/.config/opencode/opencode-mem.jsonc` 或项目级 `.opencode/opencode-mem.jsonc` 中添加：
+
+```jsonc
+{
+  "diag": true,
+}
+```
+
+该字段在 `initConfig()` 完成后生效，适合排查 `session.idle`、auto-capture、配置合并等运行期问题。默认 `false`，配置文件中未写也等同于关闭。
+
+**方式二：环境变量（临时/早期启动）**
+
+必须在启动 OpenCode 之前设置：
 
 ```bash
 export OPENCODE_MEM_DIAG=1
 opencode
 ```
+
+环境变量在整个进程生命周期内有效，特别适合配置加载前的早期启动阶段。即使配置文件设为 `false`，环境变量仍能强制开启。
+
+**查看日志**
 
 另一个终端查看日志：
 
@@ -368,7 +396,7 @@ Auto-capture final error after N attempts
 
 ### 7.4 最小端到端验证
 
-1. 启动时设置 `OPENCODE_MEM_DIAG=1`。
+1. 启动时设置 `OPENCODE_MEM_DIAG=1`，或在配置文件中设置 `"diag": true`。
 2. 在一个新会话中完成明确的技术任务，例如修改一个函数并运行测试。
 3. 等待 OpenCode 把会话置为 idle，再等待插件额外的 10 秒。
 4. 查找 `Auto-capture memory persisted` 或 `Auto-capture skipped`。

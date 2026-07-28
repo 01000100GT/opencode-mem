@@ -135,9 +135,21 @@ export function log(message: string, data?: unknown) {
   appendFileSync(logFile, line);
 }
 
+// 全局唯一的Symbol键，用于在globalThis上存储已记录的诊断日志路径集合，避免重复日志
 const DIAG_LOGGED_PATHS_KEY = Symbol.for("opencode-mem.diag.loggedPaths");
 
+// 运行时从配置文件注入的 diag 开关；null 表示尚未注入
+let configDiag: boolean | null = null;
+
+// 由 config.ts 在 initConfig 时调用，把 opencode-mem.jsonc 的 diag 字段注入到此
+// 这样可以避免 logger <-> config 之间的循环依赖
+export function setDiagFromConfig(value: boolean): void {
+  configDiag = value;
+}
+
+// 检查诊断日志功能是否启用：配置文件 diag 或环境变量 OPENCODE_MEM_DIAG=1，任一为 true 即启用
 export function isDiagEnabled(): boolean {
+  if (configDiag === true) return true;
   return process.env.OPENCODE_MEM_DIAG === "1";
 }
 

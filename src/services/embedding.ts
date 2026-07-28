@@ -96,9 +96,12 @@ export class EmbeddingService {
 
       // Local model path
       const { pipeline } = await ensureTransformersLoaded();
-      this.pipe = await pipeline("feature-extraction", CONFIG.embeddingModel, {
-        progress_callback: progressCallback,
-      });
+      // 仅在配置了 embeddingDtype 时透传给 transformers.js；未配置则保持库默认（fp32）
+      const pipelineOpts: Record<string, unknown> = { progress_callback: progressCallback };
+      if (CONFIG.embeddingDtype) {
+        pipelineOpts.dtype = CONFIG.embeddingDtype;
+      }
+      this.pipe = await pipeline("feature-extraction", CONFIG.embeddingModel, pipelineOpts);
       this.isWarmedUp = true;
       log("Embedding model warmed up", { model: CONFIG.embeddingModel });
     } catch (error) {

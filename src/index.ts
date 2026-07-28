@@ -974,65 +974,90 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
         }, 10000);
       }
 
+      // 匹配会话压缩完成事件，该事件在会话历史成功压缩后触发
       if (event.type === "session.compacted") {
+        // 守卫条件：系统未完成核心配置 或 会话压缩功能未在配置中开启，满足任一条件则终止后续处理
         if (!isConfigured() || !CONFIG.compaction.enabled) {
+          // 若诊断日志功能已启用，输出守卫条件的实际生效逻辑，便于调试追踪
           if (isDiagEnabled()) {
+            // 调用诊断日志函数，记录会话压缩事件的守卫条件实际触发规则，明确核心控制开关为压缩功能开关
             diagLog(
               "index.ts:641",
               "session.compacted guard — isConfigured always true, actual gate: CONFIG.compaction.enabled",
               {
+                // 核心配置的完成状态，传入当前实际值便于日志中完整还原条件判断现场
                 isConfigured: isConfigured(),
+                // 会话压缩功能的开启状态，传入当前实际配置值，记录本次条件判断的核心否决项
                 compactionEnabled: CONFIG.compaction.enabled,
               }
             );
           }
+          // 条件不满足时直接返回，提前终止当前会话压缩事件的处理流程，避免无效逻辑执行
           return;
         }
 
+        // 从事件属性中提取会话唯一标识，使用可选链操作符安全访问避免空值异常
         const sessionID = event.properties?.sessionID;
+        // 若无法获取有效会话ID，直接终止当前会话压缩事件的处理流程
         if (!sessionID) return;
 
         try {
+          // 获取当前项目的标签信息，包含项目唯一标识、用户信息等核心上下文数据
           const tags = getTags(directory);
 
+          // 通过会话ID异步检索该会话关联的所有历史记忆，传入项目标签限定范围和配置的最大记忆数量
           const memoriesResult = await memoryClient.searchMemoriesBySessionID(
             sessionID,
             tags.project.tag,
             CONFIG.compaction.memoryLimit
           );
 
+          // 若记忆检索失败或未找到任何关联记忆，直接终止后续压缩注入流程
           if (!memoriesResult.success || memoriesResult.results.length === 0) {
             return;
           }
 
+          // 调用记忆格式化工具，将检索到的原始记忆数组转换为会话压缩流程所需的标准化上下文文本
           const memoryContext = formatMemoriesForCompaction(memoriesResult.results);
 
+          // 调用会话客户端的提示注入接口，将格式化后的记忆上下文作为新消息片段注入到当前会话
           await ctx.client.session.prompt({
             path: { id: sessionID },
             body: {
+              // 生成唯一的片段ID，标记该片段为压缩流程注入的记忆内容，携带当前时间戳避免ID冲突
               parts: [{ id: `prt-compaction-${Date.now()}`, type: "text", text: memoryContext }],
+              // 标记该消息无需模型生成回复，仅作为上下文补充注入会话历史
               noReply: true,
             },
           });
 
+          // 检查客户端是否存在TUI（终端用户界面）实例，确保界面能力可用
           if (ctx.client?.tui) {
+            // 调用TUI的消息提示接口，异步展示操作成功的通知
             await ctx.client.tui
               .showToast({
                 body: {
+                  // 通知标题，标记本次提示的核心主题为记忆恢复成功
                   title: "Memory Restored",
+                  // 通知内容，动态展示本次注入的记忆条目数量，告知用户压缩后记忆回填的具体规模
                   message: `${memoriesResult.results.length} memories injected after compaction`,
+                  // 提示样式类型，设置为成功态，界面将展示对应的成功风格图标与配色
                   variant: "success",
+                  // 提示展示时长，单位为毫秒，3000毫秒即3秒后自动消失
                   duration: 3000,
                 },
               })
+              // 捕获提示展示过程中可能发生的异常，静默处理避免影响核心流程
               .catch(() => {});
           }
 
+          // 记录压缩流程内存注入完成的操作日志，包含会话ID和注入的记忆条目数量，用于系统审计与问题排查
           log("Compaction memory injected", {
             sessionID,
             count: memoriesResult.results.length,
           });
         } catch (error) {
+          // 捕获压缩处理流程中抛出的所有异常，记录错误日志避免进程崩溃，保留错误上下文便于定位问题
           log("Compaction handler error", { error: String(error) });
         }
       }
@@ -1040,30 +1065,48 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   };
 };
 
+// 格式化搜索结果函数，接收搜索关键词、原始结果集和可选的结果数量限制参数，返回标准化的JSON字符串响应
 function formatSearchResults(query: string, results: any, limit?: number): string {
+  // 从原始结果中提取记忆数组，若结果集无有效列表则初始化为空数组避免空指针异常
   const memoryResults = results.results || [];
+  // 序列化并返回标准化的搜索结果响应对象
   return JSON.stringify({
+    // 标记本次搜索请求处理成功
     success: true,
+    // 原样返回用户传入的搜索关键词，用于前端结果关联校验
     query,
+    // 返回匹配到的记忆总数量，体现完整的搜索匹配规模
     count: memoryResults.length,
+    // 生成截断并格式化后的结果列表，按要求限制返回条目数量，默认最多返回10条
     results: memoryResults.slice(0, limit || 10).map((r: any) => ({
+      // 记忆的唯一标识ID，保留原始系统生成的唯一标识符用于后续操作
       id: r.id,
+      // 记忆的核心内容，优先取完整记忆文本，兼容分块存储的场景下的块内容兜底
       content: r.memory || r.chunk,
+      // 计算相似度百分比，将0-1的原始相似度分数转换为整数百分比便于前端展示
       similarity: Math.round(r.similarity * 100),
     })),
   });
 }
 
+// 会话压缩记忆格式化函数：将历史记忆数组转换为Markdown格式的统一上下文文本，用于会话历史回填
 function formatMemoriesForCompaction(memories: any[]): string {
+  // 初始化输出字符串，写入顶级标题标记本次注入的内容为恢复的会话记忆
   let output = `## Restored Session Memory\n\n`;
 
+  // 遍历所有传入的记忆条目，按顺序组装成结构化文本
   memories.forEach((m, i) => {
+    // 为每条记忆添加三级标题，按序号标记记忆条目避免内容混淆
     output += `### Memory ${i + 1}\n`;
+    // 拼接记忆的核心内容文本，保留原始记忆的完整信息
     output += `${m.memory}\n\n`;
+    // 检查当前记忆是否存在关联标签，若存在则追加标签行
     if (m.tags && m.tags.length > 0) {
+      // 将标签数组拼接为逗号分隔的字符串，便于阅读和上下文解析
       output += `Tags: ${m.tags.join(", ")}\n\n`;
     }
   });
 
+  // 返回组装完成的完整记忆上下文文本，用于注入到压缩后的会话中
   return output;
 }

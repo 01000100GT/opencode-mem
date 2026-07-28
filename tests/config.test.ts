@@ -104,6 +104,11 @@ describe("config", () => {
       expect(typeof CONFIG.showErrorToasts).toBe("boolean");
     });
 
+    it("should default diag to false", () => {
+      expect(typeof CONFIG.diag).toBe("boolean");
+      expect(CONFIG.diag).toBe(false);
+    });
+
     it("should not treat template manual API placeholders as usable auto-capture config", () => {
       expect(
         hasAutoCaptureProviderConfig({
@@ -210,6 +215,37 @@ describe("config", () => {
     it("does not treat real-looking or absent API keys as placeholders", () => {
       expect(isPlaceholderApiKey("sk-test-realish")).toBe(false);
       expect(isPlaceholderApiKey(undefined)).toBe(false);
+    });
+  });
+
+  describe("diag config -> logger injection", () => {
+    it("isDiagEnabled reflects CONFIG.diag after initConfig", async () => {
+      const { isDiagEnabled, setDiagFromConfig } = await import("../src/services/logger.js");
+
+      // 默认 CONFIG.diag 为 false
+      setDiagFromConfig(false);
+      expect(isDiagEnabled()).toBe(false);
+
+      // 模拟配置文件设置 diag: true
+      setDiagFromConfig(true);
+      expect(isDiagEnabled()).toBe(true);
+
+      // 恢复，避免污染其他测试
+      setDiagFromConfig(false);
+    });
+
+    it("isDiagEnabled falls back to env var when config not injected", async () => {
+      const { isDiagEnabled, setDiagFromConfig } = await import("../src/services/logger.js");
+      const prev = process.env.OPENCODE_MEM_DIAG;
+
+      setDiagFromConfig(false);
+      process.env.OPENCODE_MEM_DIAG = "1";
+      try {
+        expect(isDiagEnabled()).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.OPENCODE_MEM_DIAG;
+        else process.env.OPENCODE_MEM_DIAG = prev;
+      }
     });
   });
 });
