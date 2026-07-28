@@ -57,10 +57,15 @@ export function getV2Client(): OpencodeClient | undefined {
 }
 
 export function createV2Client(serverUrl: URL | string, transport?: HostTransport): OpencodeClient {
+  // 将输入的服务器地址统一转换为字符串格式，支持直接传入URL对象或字符串
   const baseUrl = typeof serverUrl === "string" ? serverUrl : serverUrl.toString();
+  // 确定最终使用的传输层配置：优先使用传入的transport参数，否则如果存在全局自定义fetch则创建基础配置
   const activeTransport = transport ?? (_hostFetch ? { fetch: _hostFetch } : undefined);
+  // 保存服务器基础URL到模块级变量，供后续API调用时使用
   _v2BaseUrl = baseUrl;
+  // 标记是否启用SDK原生传输：只要activeTransport存在自定义fetch或请求头就启用
   _useSdkTransport = Boolean(activeTransport?.fetch || activeTransport?.headers);
+  // 创建并返回懒加载初始化的V2客户端实例
   return createLazyV2Client(baseUrl, activeTransport);
 }
 
