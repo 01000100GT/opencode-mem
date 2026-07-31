@@ -1,35 +1,62 @@
+// 从 sqlite-bootstrap 模块导入获取 SQLite 数据库类的函数
 import { getDatabase } from "../sqlite/sqlite-bootstrap.js";
+// 从 Node.js 内置 path 模块导入路径拼接函数 join
 import { join } from "node:path";
+// 从 connection-manager 模块导入 SQLite 数据库连接管理器实例
 import { connectionManager } from "../sqlite/connection-manager.js";
+// 从全局配置文件导入配置对象 CONFIG
 import { CONFIG } from "../../config.js";
 
+// 调用 getDatabase 函数初始化并获取动态加载的 Database 类构造函数
 const Database = getDatabase();
+// 声明 DatabaseType 类型别名，指向 Database 实例的原型类型
 type DatabaseType = typeof Database.prototype;
 
+// 定义用户提示词数据库常量的文件名
 const USER_PROMPTS_DB_NAME = "user-prompts.db";
 
+// 导出用户提示词实体的数据结构接口定义
 export interface UserPrompt {
+  // 提示词条目的唯一标识符（UUID）
   id: string;
+  // 关联的会话 ID
   sessionId: string;
+  // 关联的消息 ID
   messageId: string;
+  // 提示词所属的项目绝对路径，允许为 null
   projectPath: string | null;
+  // 用户输入的原始提示词文本内容
   content: string;
+  // 提示词创建的时间戳（单位：毫秒）
   createdAt: number;
+  // 标记该提示词是否已被提取捕获为记忆数据
   captured: boolean;
+  // 标记是否已捕获用户学习行为或偏好数据
   userLearningCaptured: boolean;
+  // 关联生成的记忆条目 ID，无关联时为 null
   linkedMemoryId: string | null;
+  // 记录尝试提取捕获该提示词的重试次数
   capture_attempts: number;
+  // 大语言模型服务提供商标识符（如 openai, anthropic），允许为 null
   providerId: string | null;
+  // 具体调用的模型名称标识符（如 gpt-4o），允许为 null
   modelId: string | null;
 }
 
+// 导出 UserPromptManager 类，用于管理用户提示词的数据持久化与生命周期
 export class UserPromptManager {
+  // 定义私有属性 db，保存数据库实例连接
   private db: DatabaseType;
+  // 定义私有只读属性 dbPath，保存数据库文件的磁盘绝对路径
   private readonly dbPath: string;
 
+  // 构造函数，初始化数据库路径、获取数据库连接并初始化数据表结构
   constructor() {
+    // 拼接配置中的存储目录路径与数据库文件名，计算数据库的绝对存储路径
     this.dbPath = join(CONFIG.storagePath, USER_PROMPTS_DB_NAME);
+    // 通过 connectionManager 管理器根据数据库路径获取或创建 SQLite 数据库连接实例
     this.db = connectionManager.getConnection(this.dbPath);
+    // 调用 initDatabase 私有方法，执行建表及字段迁移校验逻辑
     this.initDatabase();
   }
 
