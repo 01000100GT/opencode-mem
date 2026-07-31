@@ -316,73 +316,129 @@ export async function handleListMemories(
       // defense-in-depth check on container_tag, just widens it to both
       // canonical scope markers.
       const projectShards = shardManager.getAllShards("project", "");
+      // 同时遍历项目域和用户域的所有分片
+      // 此前该逻辑仅遍历了项目分片，这会导致用户域的记忆在列表接口中被隐藏
+      // 受影响的场景包括：前端Web UI的导航浏览、不带标签过滤参数的/api/memories接口调用等
+      // 虽然用户域的记忆仍然能在/api/search接口和/api/stats接口的byType统计中被查询到，但
+      // 获取所有项目级别的数据库分片，第二参数为空字符串表示匹配任意哈希值的项目分片
       const userShards = shardManager.getAllShards("user", "");
+      // 获取所有用户级别的数据库分片，第二参数为空字符串表示匹配任意哈希值的用户分片
       for (const shard of [...projectShards, ...userShards]) {
+        // 将项目分片和用户分片合并为一个数组，遍历所有需要处理的数据库分片
         const db = connectionManager.getConnection(shard.dbPath);
+        // 通过连接管理器获取当前分片数据库路径对应的数据库连接实例
         const memories = vectorSearch.getAllMemories(db);
+        // 调用向量检索服务，从当前数据库连接中获取所有存储的记忆记录
         allMemories.push(
+          // 将当前分片查询到的符合条件的记忆记录追加到全局汇总数组中
           ...memories.filter(
             (m: any) =>
+              // 过滤记忆记录，仅保留容器标签包含项目级标识或用户级标识的有效记录
               m.container_tag?.includes("_project_") || m.container_tag?.includes("_user_")
           )
         );
       }
     }
 
+    // 遍历所有记忆记录，转换为统一格式的记忆对象数组
     const memoriesWithType = allMemories.map((r: any) => {
+      // 安全解析数据库中存储的元数据JSON字符串
       const metadata = safeJSONParse(r.metadata);
+      // 返回格式化后的记忆对象，统一数据库字段名与应用层字段名
       return {
+        // 标记该条目类型为记忆
         type: "memory",
+        // 记忆的唯一标识符
         id: r.id,
+        // 记忆的核心文本内容
         content: r.content,
+        // 记忆的业务分类类型
         memoryType: r.type,
+        // 将数据库中逗号分隔的标签字符串转换为数组，去除首尾空白字符
         tags: r.tags ? r.tags.split(",").map((t: string) => t.trim()) : [],
+        // 将数据库存储的时间戳转换为数字类型
         createdAt: Number(r.created_at),
+        // 处理更新时间，若存在则转换为数字，否则设为undefined
         updatedAt: r.updated_at ? Number(r.updated_at) : undefined,
+        // 解析后的元数据对象
         metadata,
+        // 从元数据中提取关联的提示词ID
         linkedPromptId: metadata?.promptId,
+        // 创建者的友好显示名称
         displayName: r.display_name,
+        // 创建者的账户用户名
         userName: r.user_name,
+        // 创建者的电子邮箱地址
         userEmail: r.user_email,
+        // 关联项目的本地绝对路径
         projectPath: r.project_path,
+        // 关联项目的名称
         projectName: r.project_name,
+        // 关联项目的Git仓库地址
         gitRepoUrl: r.git_repo_url,
+        // 判断是否置顶，数据库中1表示置顶，转换为布尔值
         isPinned: r.is_pinned === 1,
       };
     });
 
+    // 初始化时间线数组，先放入所有记忆数据
     let timeline: any[] = memoriesWithType;
+    // 检查是否需要在结果中包含提示词数据
     if (includePrompts) {
+      // 如果传入了标签参数，先获取该标签关联的项目路径，否则设为未定义
       const projectPath = tag ? getProjectPathFromTag(tag) : undefined;
+      // 从用户提示词管理器中获取指定项目路径下的所有捕获的提示词
       const prompts = userPromptManager.getCapturedPrompts(projectPath);
+      // 将原始提示词数据统一格式，添加类型标记，统一字段结构
       const promptsWithType = prompts.map((p) => ({
+        // 标记该条目类型为提示词
         type: "prompt",
+        // 提示词的唯一标识符
         id: p.id,
+        // 提示词所属的会话ID
         sessionId: p.sessionId,
+        // 提示词的具体文本内容
         content: p.content,
+        // 提示词的创建时间戳
         createdAt: p.createdAt,
+        // 提示词关联的项目本地路径
         projectPath: p.projectPath,
+        // 提示词关联绑定的记忆条目ID
         linkedMemoryId: p.linkedMemoryId,
       }));
+      // 将记忆数据和格式化后的提示词数据合并，形成完整的时间线数组
       timeline = [...memoriesWithType, ...promptsWithType];
     }
 
+    // 初始化关联对Map，键为关联ID，值为存储配对的记忆和提示词对象
     const linkedPairs = new Map<string, { memory: any; prompt: any }>();
+    // 初始化独立条目数组，存放无关联关系的记忆或提示词
     const standalone: any[] = [];
+    // 遍历时间线中的所有条目，分类处理关联配对与独立条目
     for (const item of timeline) {
+      // 若当前条目是记忆类型且存在关联的提示词ID
       if (item.type === "memory" && item.linkedPromptId) {
+        // 检查Map中是否已存在该关联ID的条目
         if (!linkedPairs.has(item.linkedPromptId)) {
+          // 不存在则初始化关联条目，存入当前记忆对象，提示词暂设为null
           linkedPairs.set(item.linkedPromptId, { memory: item, prompt: null });
         } else {
+          // 已存在则更新关联条目中的记忆对象
           linkedPairs.get(item.linkedPromptId)!.memory = item;
         }
+        // 若当前条目是提示词类型且存在关联的记忆ID
       } else if (item.type === "prompt" && item.linkedMemoryId) {
+        // 检查Map中是否已存在当前提示词ID的条目
         if (!linkedPairs.has(item.id)) {
+          // 不存在则初始化关联条目，存入当前提示词对象，记忆暂设为null
           linkedPairs.set(item.id, { memory: null, prompt: item });
         } else {
+          // 已存在则更新关联条目中的提示词对象
           linkedPairs.get(item.id)!.prompt = item;
         }
+        // 所有无有效关联关系的条目
       } else {
+        // 加入独立条目数组
         standalone.push(item);
       }
     }
