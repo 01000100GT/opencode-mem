@@ -38,7 +38,7 @@ function toBlob(vector?: Float32Array): Uint8Array | null {
 // 导出向量搜索核心类，提供统一的向量存储与检索能力封装
 export class VectorSearch {
   // 私有只读属性：主向量后端实例的Promise对象，支持异步初始化与延迟加载
-  private readonly backendPromise: Promise<VectorBackend>;
+  private backendPromise: Promise<VectorBackend> | null = null;
   // 私有只读属性：降级备用向量后端实例，主后端故障时自动切换保障可用性
   private readonly fallbackBackend: VectorBackend;
 
@@ -46,18 +46,22 @@ export class VectorSearch {
   // backend：可选的自定义向量后端实例，若传入则直接使用，否则根据配置创建默认后端
   // fallbackBackend：可选的降级备用后端，默认实例化精确扫描后端作为保底方案
   constructor(backend?: VectorBackend, fallbackBackend: VectorBackend = new ExactScanBackend()) {
-    // 初始化主后端Promise：若传入自定义后端则包装为已解决的Promise，否则调用工厂函数创建配置指定的后端实例
-    this.backendPromise = backend
-      ? Promise.resolve(backend)
-      : createVectorBackend({ vectorBackend: CONFIG.vectorBackend });
+    // 初始化主后端Promise：若传入自定义后端则包装为已解决的Promise
+    // 注意：不传 backend 时不立即创建——延迟到首次 getBackend() 调用，
+    // 确保 CONFIG 已由 initConfig 初始化完毕（否则 vectorBackend 仍为默认值 "usearch-first"）
+    if (backend) {
+      this.backendPromise = Promise.resolve(backend);
+    }
     // 保存降级备用后端实例到类属性，供主后端异常时切换使用
     this.fallbackBackend = fallbackBackend;
   }
 
   // 获取初始化完成的向量后端实例
-  // 封装后端异步初始化逻辑，统一处理主后端的就绪状态
-  // 返回已解析的VectorBackend实例，供调用方直接使用核心向量操作能力
+  // 首次调用时才根据 CONFIG.vectorBackend 创建后端，确保配置已就绪
   private async getBackend(): Promise<VectorBackend> {
+    if (!this.backendPromise) {
+      this.backendPromise = createVectorBackend({ vectorBackend: CONFIG.vectorBackend });
+    }
     return this.backendPromise;
   }
 

@@ -25,11 +25,33 @@ const opencodeProviderLoaderUrl = new URL(
   "../src/services/ai/opencode-provider-loader.js",
   import.meta.url
 ).href;
+const aiProviderFactoryUrl = new URL("../src/services/ai/ai-provider-factory.js", import.meta.url)
+  .href;
+const providerConfigUrl = new URL("../src/services/ai/provider-config.js", import.meta.url).href;
 
-function runScenario() {
+type ScenarioOptions = {
+  providerMode?: "opencode" | "manual";
+  structuredOutput?: Record<string, unknown>;
+  manualResult?: Record<string, unknown>;
+};
+
+function runScenario(options: ScenarioOptions = {}) {
   const dir = mkdtempSync(join(tmpdir(), "opencode-mem-auto-capture-"));
   tempDirs.push(dir);
   const scriptPath = join(dir, "scenario.mjs");
+  const providerMode = options.providerMode ?? "opencode";
+  const structuredOutput =
+    options.structuredOutput ??
+    ({
+      summary: "summary-default",
+      type: "discussion",
+      tags: [],
+      mem_types: [],
+      entities: [],
+      constraint_kinds: [],
+      decision_tags: [],
+    } satisfies Record<string, unknown>);
+  const manualResult = options.manualResult ?? structuredOutput;
 
   const script = `
 import { mock } from "bun:test";
@@ -60,6 +82,7 @@ const prompts = [
 ];
 const addCalls = [];
 const summaryPrompts = [];
+let manualCallCount = 0;
 
 function pendingForSession(sessionId) {
   return prompts
@@ -70,10 +93,14 @@ function pendingForSession(sessionId) {
 mock.module(${JSON.stringify(configUrl)}, () => ({
   CONFIG: {
     autoCaptureMaxRetries: 1,
-    autoCaptureProviderStatus: { ready: true, mode: "opencode", issues: [] },
+    autoCaptureProviderStatus: { ready: true, mode: ${JSON.stringify(providerMode)}, issues: [] },
     autoCaptureLanguage: "en",
-    opencodeProvider: "openai",
-    opencodeModel: "gpt-test",
+    opencodeProvider: ${providerMode === "opencode" ? '"openai"' : "undefined"},
+    opencodeModel: ${providerMode === "opencode" ? '"gpt-test"' : "undefined"},
+    memoryProvider: "openai-chat",
+    memoryModel: ${providerMode === "manual" ? '"gpt-fallback"' : "undefined"},
+    memoryApiUrl: ${providerMode === "manual" ? '"https://api.test/v1"' : "undefined"},
+    memoryApiKey: ${providerMode === "manual" ? '"test-key"' : "undefined"},
     showAutoCaptureToasts: false,
     showErrorToasts: false,
   },
@@ -150,7 +177,11 @@ mock.module(${JSON.stringify(promptManagerUrl)}, () => ({
   },
 }));
 
-mock.module(${JSON.stringify(loggerUrl)}, () => ({ log: () => {} }));
+mock.module(${JSON.stringify(loggerUrl)}, () => ({
+  log: () => {},
+  isDiagEnabled: () => false,
+  diagWarn: () => {},
+}));
 mock.module(${JSON.stringify(languageUrl)}, () => ({
   detectLanguage: () => "en",
   getLanguageName: () => "English",
@@ -161,12 +192,25 @@ mock.module(${JSON.stringify(opencodeProviderLoaderUrl)}, () => ({
     getV2Client: () => ({}),
     generateStructuredOutput: async ({ userPrompt }) => {
       summaryPrompts.push(userPrompt);
-      return {
-        summary: userPrompt.includes("First request") ? "summary-first" : "summary-second",
-        type: "discussion",
-        tags: [],
-      };
+      return ${JSON.stringify(structuredOutput)};
     },
+  }),
+}));
+mock.module(${JSON.stringify(aiProviderFactoryUrl)}, () => ({
+  AIProviderFactory: {
+    createProvider: () => ({
+      executeToolCall: async () => {
+        manualCallCount += 1;
+        return { success: true, data: ${JSON.stringify(manualResult)} };
+      },
+    }),
+  },
+}));
+mock.module(${JSON.stringify(providerConfigUrl)}, () => ({
+  buildMemoryProviderConfig: () => ({
+    model: "gpt-fallback",
+    apiUrl: "https://api.test/v1",
+    apiKey: "test-key",
   }),
 }));
 
@@ -195,6 +239,13 @@ console.log(
   JSON.stringify({
     addPromptIds: addCalls.map((call) => call.metadata.promptId),
     summaries: addCalls.map((call) => call.content),
+    metadataSnapshots: addCalls.map((call) => ({
+      memTypes: call.metadata.mem_types,
+      entities: call.metadata.entities,
+      constraintKinds: call.metadata.constraint_kinds,
+      decisionTags: call.metadata.decision_tags,
+    })),
+    manualCallCount,
     summaryPrompts,
   })
 );
@@ -220,15 +271,82 @@ console.log(
 }
 
 describe("auto-capture idle processing", () => {
-  it("captures all uncaptured prompts in a session in chronological response windows", () => {
-    const result = runScenario();
+  it("captures mem_types and entities from the opencode structured-output path", () => {
+    const result = runScenario({
+      providerMode: "opencode",
+      structuredOutput: {
+        summary: "summary-opencode",
+        type: "discussion",
+        tags: ["SQLite", "Rust"],
+        mem_types: ["experience", "skill", "invalid"],
+        entities: [
+          { entity: "SQLite", entity_type: "Library" },
+          { entity: "Rust", entity_type: "Technology" },
+          { entity: "Ignored", entity_type: "Unknown" },
+        ],
+        constraint_kinds: ["preserve_db_schema", "minimize_change", "invalid"],
+        decision_tags: ["architecture_boundary", "scope_control", "invalid"],
+      },
+    });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.parsed?.addPromptIds).toEqual(["prompt-1", "prompt-2"]);
-    expect(result.parsed?.summaries).toEqual(["summary-first", "summary-second"]);
+    expect(result.parsed?.summaries).toEqual([
+      "summary-opencode\n\nTags: sqlite, rust",
+      "summary-opencode\n\nTags: sqlite, rust",
+    ]);
+    expect(result.parsed?.metadataSnapshots).toEqual([
+      {
+        memTypes: ["experience", "skill"],
+        entities: [
+          { entity: "SQLite", entity_type: "Library" },
+          { entity: "Rust", entity_type: "Technology" },
+        ],
+        constraintKinds: ["preserve_db_schema", "minimize_change"],
+        decisionTags: ["architecture_boundary", "scope_control"],
+      },
+      {
+        memTypes: ["experience", "skill"],
+        entities: [
+          { entity: "SQLite", entity_type: "Library" },
+          { entity: "Rust", entity_type: "Technology" },
+        ],
+        constraintKinds: ["preserve_db_schema", "minimize_change"],
+        decisionTags: ["architecture_boundary", "scope_control"],
+      },
+    ]);
+    expect(result.parsed?.manualCallCount).toBe(0);
     expect(result.parsed?.summaryPrompts[0]).toContain("First response");
     expect(result.parsed?.summaryPrompts[0]).not.toContain("Second response");
     expect(result.parsed?.summaryPrompts[1]).toContain("Second response");
+  });
+
+  it("supports the manual fallback path and degrades invalid cognitive fields to empty arrays", () => {
+    const result = runScenario({
+      providerMode: "manual",
+      manualResult: {
+        summary: "summary-manual",
+        type: "discussion",
+        tags: [],
+        mem_types: ["bogus"],
+        entities: [
+          { entity: "", entity_type: "Library" },
+          { entity: "UnknownNode", entity_type: "Unknown" },
+        ],
+        constraint_kinds: ["not-real"],
+        decision_tags: ["not-real"],
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.parsed?.addPromptIds).toEqual(["prompt-1", "prompt-2"]);
+    expect(result.parsed?.metadataSnapshots).toEqual([
+      { memTypes: [], entities: [], constraintKinds: [], decisionTags: [] },
+      { memTypes: [], entities: [], constraintKinds: [], decisionTags: [] },
+    ]);
+    expect(result.parsed?.manualCallCount).toBe(2);
+    expect(result.parsed?.summaryPrompts).toEqual([]);
   });
 });

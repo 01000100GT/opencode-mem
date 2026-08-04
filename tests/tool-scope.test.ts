@@ -26,6 +26,7 @@ const promptManagerUrl = new URL(
 const webServerUrl = new URL("../src/services/web-server.js", import.meta.url).href;
 const loggerUrl = new URL("../src/services/logger.js", import.meta.url).href;
 const languageUrl = new URL("../src/services/language-detector.js", import.meta.url).href;
+const taskSupportUrl = new URL("../src/services/task-support.js", import.meta.url).href;
 
 type ScenarioInput = {
   defaultScope?: "project" | "all-projects";
@@ -42,6 +43,7 @@ import { mock } from "bun:test";
 
 const searchCalls = [];
 let lastListScope;
+let supportCall = null;
 const defaultScope = ${JSON.stringify(input.defaultScope)};
 
 mock.module(${JSON.stringify(clientUrl)}, () => ({
@@ -75,6 +77,7 @@ mock.module(${JSON.stringify(configUrl)}, () => ({
   },
   initConfig: () => {},
   isConfigured: () => true,
+  getAutoCaptureProviderStatus: () => ({ ready: false, issues: [] }),
 }));
 
 mock.module(${JSON.stringify(tagsUrl)}, () => ({
@@ -89,11 +92,51 @@ mock.module(${JSON.stringify(privacyUrl)}, () => ({
 mock.module(${JSON.stringify(autoCaptureUrl)}, () => ({ performAutoCapture: async () => {} }));
 mock.module(${JSON.stringify(learningUrl)}, () => ({ performUserProfileLearning: async () => {} }));
 mock.module(${JSON.stringify(promptManagerUrl)}, () => ({ userPromptManager: { savePrompt() {} } }));
+mock.module(${JSON.stringify(taskSupportUrl)}, () => ({
+  generateTaskSupport: async (args) => {
+    supportCall = args;
+    return {
+      success: true,
+      mode: args.mode,
+      task: args.task,
+      scope: args.scope,
+      usedAI: false,
+      memoriesConsidered: 0,
+      memoryRefs: [],
+      ...(args.mode === "brief"
+        ? {
+            brief: {
+              taskGoal: args.task,
+              relatedFiles: [],
+              relatedSymbols: [],
+              historicalDecisions: [],
+              constraintKinds: [],
+              constraints: [],
+              userPreferences: [],
+              risks: [],
+              successCriteria: [],
+            },
+          }
+        : {
+            checklist: {
+              successCriteria: [],
+              verificationHints: [],
+              evidenceTemplates: [],
+              remainingRisks: [],
+            },
+          }),
+    };
+  },
+}));
 mock.module(${JSON.stringify(webServerUrl)}, () => ({
   startWebServer: async () => null,
   WebServer: class {},
 }));
-mock.module(${JSON.stringify(loggerUrl)}, () => ({ log: () => {} }));
+mock.module(${JSON.stringify(loggerUrl)}, () => ({
+  log: () => {},
+  isDiagEnabled: () => false,
+  diagLog: () => {},
+}));
 mock.module(${JSON.stringify(languageUrl)}, () => ({ getLanguageName: () => "English" }));
 
 const { OpenCodeMemPlugin } = await import(${JSON.stringify(indexUrl)});
@@ -110,6 +153,8 @@ console.log(
   JSON.stringify({
     searchScope: searchCalls[0]?.[2],
     listScope: lastListScope,
+    supportScope: supportCall?.scope,
+    supportMode: supportCall?.mode,
   })
 );
 `;
@@ -164,5 +209,29 @@ describe("tool memory scope", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.parsed?.listScope).toBe("project");
+  });
+
+  it("passes default scope into brief generation", () => {
+    const result = runScenario({
+      defaultScope: "all-projects",
+      args: { mode: "brief", query: "add task brief" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.parsed?.supportMode).toBe("brief");
+    expect(result.parsed?.supportScope).toBe("all-projects");
+  });
+
+  it("lets checklist generation override config scope", () => {
+    const result = runScenario({
+      defaultScope: "all-projects",
+      args: { mode: "checklist", query: "verify metadata", scope: "project" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.parsed?.supportMode).toBe("checklist");
+    expect(result.parsed?.supportScope).toBe("project");
   });
 });

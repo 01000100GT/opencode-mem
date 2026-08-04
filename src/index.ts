@@ -33,6 +33,11 @@ import type { MemoryType } from "./types/index.js";
 import { getLanguageName } from "./services/language-detector.js";
 // 从记忆客户端模块导入MemoryScope类型，用于定义记忆检索的作用域（当前项目/所有项目）
 import type { MemoryScope } from "./services/client.js";
+// 导入任务支持生成器，为任务前后的 brief / checklist 提供只读生成能力
+import { generateTaskSupport, type TaskBrief } from "./services/task-support.js";
+import { writeCompletionChecklistMemories } from "./services/completion-writeback.js";
+import { extractSessionExecutionEvidence } from "./services/session-evidence.js";
+import { generateCompletionGateSuggestion } from "./services/completion-gate-advisor.js";
 // 从OpenCode主机配置服务导入getHostClientConfig函数，用于获取与OpenCode宿主环境交互的客户端配置
 import { getHostClientConfig } from "./services/ai/opencode-host-config.js";
 // 从OpenCode提供者加载器导入loadOpencodeProvider函数，用于加载并初始化OpenCode服务提供者相关能力
@@ -470,7 +475,36 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
           memories = memories.filter((m: any) => new Date(m.createdAt).getTime() > cutoffDate);
         }
 
-        if (memories.length === 0) return;
+        let taskBrief: TaskBrief | undefined;
+
+        try {
+          const briefResult = await generateTaskSupport({
+            mode: "brief",
+            task: userMessage,
+            containerTag: tags.project.tag,
+            sessionID: input.sessionID,
+            scope: CONFIG.memory.defaultScope ?? "project",
+          });
+          taskBrief = briefResult.brief;
+          log("chat.message brief generated", {
+            sessionID: input.sessionID,
+            messageID: output.message.id,
+            task: userMessage,
+            scope: briefResult.scope,
+            usedAI: briefResult.usedAI,
+            memoriesConsidered: briefResult.memoriesConsidered,
+            memoryRefs: briefResult.memoryRefs,
+            brief: briefResult.brief,
+          });
+        } catch (error) {
+          log("chat.message brief generation failed", {
+            sessionID: input.sessionID,
+            messageID: output.message.id,
+            error: String(error),
+          });
+        }
+
+        if (memories.length === 0 && !taskBrief) return;
 
         // 构造项目记忆数据结构，用于后续格式化提示词上下文
         const projectMemories = {
@@ -490,9 +524,16 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
         // 提取当前用户的邮箱作为唯一用户标识，若无法获取邮箱则设置为null
         const userId = tags.user.userEmail || null;
         // 调用上下文格式化工具，将用户标识与项目记忆数据转换为大模型可识别的提示词格式
-        const memoryContext = formatContextForPrompt(userId, projectMemories);
+        const memoryContext = formatContextForPrompt(userId, projectMemories, taskBrief);
 
         if (memoryContext) {
+          log("chat.message context prepared", {
+            sessionID: input.sessionID,
+            messageID: output.message.id,
+            hasBrief: !!taskBrief,
+            memoryCount: memories.length,
+            context: memoryContext,
+          });
           // 构造记忆上下文片段对象，符合SDK消息片段类型规范
           const contextPart: Part = {
             // 生成唯一片段ID，使用时间戳确保全局唯一性
@@ -573,7 +614,9 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
         description: `Manage and query project memory (MATCH USER LANGUAGE: ${getLanguageName(CONFIG.autoCaptureLanguage || "en")}). Use 'search' with technical keywords/tags, 'add' to store knowledge, 'profile' for preferences. Search/list scope: project or all-projects.`, // 工具功能描述：统一管理与查询项目记忆，需匹配用户语言；推荐使用技术关键词/标签进行搜索，add用于存储知识，profile用于处理用户偏好；搜索与列表查询支持限定当前项目或全项目范围
         args: {
           // 工具调用参数定义集合，声明所有支持的入参格式与约束
-          mode: tool.schema.enum(["add", "search", "profile", "list", "forget", "help"]).optional(), // 操作模式枚举，支持新增记忆、搜索记忆、管理用户画像、列出记忆、删除记忆、查看帮助，为可选参数
+          mode: tool.schema
+            .enum(["add", "search", "profile", "list", "forget", "brief", "checklist", "help"])
+            .optional(), // 操作模式枚举，支持新增记忆、搜索记忆、管理用户画像、列出记忆、删除记忆、生成任务简报、生成完成检查清单、查看帮助，为可选参数
           content: tool.schema.string().optional(), // 记忆内容字符串，用于add或profile模式下提交需要存储的文本内容，可选参数
           query: tool.schema.string().optional(), // 搜索查询字符串，用于search模式下传入关键词进行记忆检索，可选参数
           tags: tool.schema.string().optional(), // 标签字符串，支持逗号分隔多个标签，用于add模式下为记忆标记分类标签，可选参数
@@ -583,24 +626,35 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
           scope: tool.schema.enum(["project", "all-projects"]).optional(), // 查询作用域枚举，支持限定当前项目或所有项目，用于搜索或列出记忆时指定检索范围，可选参数
         },
         // 记忆工具的核心执行方法，异步处理所有记忆管理操作
-        async execute(args: {
-          // 操作模式，可选值包含新增、搜索、画像管理、列表查询、删除、帮助，控制本次执行的具体行为
-          mode?: "add" | "search" | "profile" | "list" | "forget" | "help";
-          // 记忆内容字符串，用于新增记忆或更新用户画像时传入需要存储的文本内容，可选参数
-          content?: string;
-          // 搜索查询字符串，用于记忆搜索模式下传入关键词，可选参数
-          query?: string;
-          // 标签字符串，支持逗号分隔多个标签，用于新增记忆时标记分类标签，可选参数
-          tags?: string;
-          // 记忆类型，属于MemoryType枚举类型，用于新增记忆时指定记忆的业务分类，可选参数
-          type?: MemoryType;
-          // 记忆唯一标识ID，用于删除记忆模式下指定需要移除的具体记忆条目，可选参数
-          memoryId?: string;
-          // 返回结果数量限制，用于列表查询或搜索时控制返回的记忆条目上限，可选参数
-          limit?: number;
-          // 记忆检索作用域，属于MemoryScope枚举类型，限定查询范围为当前项目或所有项目，可选参数
-          scope?: MemoryScope;
-        }) {
+        async execute(
+          args: {
+            // 操作模式，可选值包含新增、搜索、画像管理、列表查询、删除、帮助，控制本次执行的具体行为
+            mode?:
+              | "add"
+              | "search"
+              | "profile"
+              | "list"
+              | "forget"
+              | "brief"
+              | "checklist"
+              | "help";
+            // 记忆内容字符串，用于新增记忆或更新用户画像时传入需要存储的文本内容，可选参数
+            content?: string;
+            // 搜索查询字符串，用于记忆搜索模式下传入关键词，可选参数
+            query?: string;
+            // 标签字符串，支持逗号分隔多个标签，用于新增记忆时标记分类标签，可选参数
+            tags?: string;
+            // 记忆类型，属于MemoryType枚举类型，用于新增记忆时指定记忆的业务分类，可选参数
+            type?: MemoryType;
+            // 记忆唯一标识ID，用于删除记忆模式下指定需要移除的具体记忆条目，可选参数
+            memoryId?: string;
+            // 返回结果数量限制，用于列表查询或搜索时控制返回的记忆条目上限，可选参数
+            limit?: number;
+            // 记忆检索作用域，属于MemoryScope枚举类型，限定查询范围为当前项目或所有项目，可选参数
+            scope?: MemoryScope;
+          },
+          input: { sessionID: string }
+        ) {
           // 检查记忆系统配置是否未完成初始化，若未配置则进入错误处理分支
           if (!isConfigured()) {
             // 如果诊断日志功能已开启，输出诊断日志记录该守卫条件的执行状态
@@ -618,12 +672,15 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
             });
           }
 
-          // 检查记忆客户端是否尚未完成预热初始化，异步调用isReady状态检查方法取反获取预热需求标记
-          const needsWarmup = !(await memoryClient.isReady());
-          // 如果当前确实存在预热需求（客户端未就绪）
-          if (needsWarmup) {
-            // 返回初始化中的错误响应JSON，告知调用方记忆系统正在后台初始化无法处理请求
-            return JSON.stringify({ success: false, error: "Memory system is initializing." });
+          // 未就绪时在短超时内等待后台 warmup 完成，避免首轮工具调用直接失败
+          if (!(await memoryClient.isReady())) {
+            const { ready, error } = await waitForMemoryReady();
+            if (!ready) {
+              return JSON.stringify({
+                success: false,
+                error: `Memory system unavailable: ${error ?? "initializing"}`,
+              });
+            }
           }
 
           // 解析本次工具调用的操作模式，若调用方未指定模式则默认使用help模式展示使用指南
@@ -669,6 +726,16 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
                     },
                     // 列出最近记忆命令标识
                     { command: "list", description: "List recent memories", args: ["limit?"] },
+                    {
+                      command: "brief",
+                      description: "Generate a task brief from recalled memories",
+                      args: ["query", "scope?", "limit?"],
+                    },
+                    {
+                      command: "checklist",
+                      description: "Generate a completion checklist from recalled memories",
+                      args: ["query", "scope?", "limit?"],
+                    },
                     // 删除记忆命令标识
                     { command: "forget", description: "Remove memory", args: ["memoryId"] },
                   ],
@@ -888,6 +955,20 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
                   })),
                 });
 
+              case "brief":
+              case "checklist":
+                if (!args.query) return JSON.stringify({ success: false, error: "query required" });
+                return JSON.stringify(
+                  await generateTaskSupport({
+                    mode,
+                    task: args.query,
+                    containerTag: tags.project.tag,
+                    sessionID: input.sessionID,
+                    scope: args.scope ?? CONFIG.memory.defaultScope ?? "project",
+                    limit: args.limit,
+                  })
+                );
+
               // 处理删除记忆模式分支
               case "forget":
                 // 若调用方未传入记忆唯一标识ID，返回参数缺失错误
@@ -918,14 +999,14 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
       const event = input.event;
       // 匹配到会话空闲事件类型时进入处理逻辑
       if (event.type === "session.idle") {
-        // 守卫条件：系统未完成配置 或 自动捕获功能未开启，满足任一条件则终止后续处理
-        if (!isConfigured() || !CONFIG.autoCaptureEnabled) {
+        // 守卫条件：系统未完成配置时直接终止；空闲阶段的 checklist 闭环不再依赖 auto-capture 开关
+        if (!isConfigured()) {
           // 若诊断日志功能已开启，输出守卫条件的实际生效逻辑诊断信息
           if (isDiagEnabled()) {
             // 调用诊断日志函数，记录会话空闲事件的守卫条件实际触发规则，便于调试追踪
             diagLog(
               "index.ts:607",
-              "session.idle guard — isConfigured always true, actual gate: CONFIG.autoCaptureEnabled",
+              "session.idle guard — isConfigured always true; checklist injection may still run even when auto-capture is disabled",
               {
                 // 核心配置的完成状态，传入当前实际值便于日志追踪
                 isConfigured: isConfigured(),
@@ -947,12 +1028,161 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
 
         // 设置会话空闲定时器，延迟10秒后执行后台批量处理任务
         idleTimeout = setTimeout(async () => {
+          const pendingPrompt = userPromptManager.getLastUncapturedPrompt(sessionID);
+
           try {
-            // 执行自动记忆捕获流程，将本次会话的有效交互内容持久化到记忆系统
-            await performAutoCapture(ctx, sessionID, directory);
+            if (CONFIG.autoCaptureEnabled) {
+              // 执行自动记忆捕获流程，将本次会话的有效交互内容持久化到记忆系统
+              await performAutoCapture(ctx, sessionID, directory);
+            }
+
+            if (pendingPrompt) {
+              const sanitizedTask = stripPrivateContent(pendingPrompt.content).trim();
+              if (sanitizedTask && !isFullyPrivate(pendingPrompt.content)) {
+                const briefResult = await generateTaskSupport({
+                  mode: "brief",
+                  task: sanitizedTask,
+                  containerTag: tags.project.tag,
+                  sessionID,
+                  scope: CONFIG.memory.defaultScope ?? "project",
+                });
+
+                log("session.idle brief generated", {
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  task: sanitizedTask,
+                  scope: briefResult.scope,
+                  usedAI: briefResult.usedAI,
+                  memoriesConsidered: briefResult.memoriesConsidered,
+                  memoryRefs: briefResult.memoryRefs,
+                  brief: briefResult.brief,
+                });
+
+                const checklistResult = await generateTaskSupport({
+                  mode: "checklist",
+                  task: sanitizedTask,
+                  containerTag: tags.project.tag,
+                  sessionID,
+                  scope: CONFIG.memory.defaultScope ?? "project",
+                });
+
+                log("session.idle checklist generated", {
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  task: sanitizedTask,
+                  scope: checklistResult.scope,
+                  usedAI: checklistResult.usedAI,
+                  memoriesConsidered: checklistResult.memoriesConsidered,
+                  memoryRefs: checklistResult.memoryRefs,
+                  checklist: checklistResult.checklist,
+                });
+
+                const idleMessagesResponse = await ctx.client.session.messages({
+                  path: { id: sessionID },
+                });
+                const executionEvidence = extractSessionExecutionEvidence(
+                  idleMessagesResponse.data || [],
+                  pendingPrompt.messageId
+                );
+
+                log("session.idle execution evidence", {
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  task: sanitizedTask,
+                  evidence: executionEvidence,
+                });
+
+                const evidenceCoverage = evaluateEvidenceTemplateCoverage(
+                  checklistResult.checklist?.evidenceTemplates,
+                  executionEvidence
+                );
+
+                log("session.idle evidence template coverage", {
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  task: sanitizedTask,
+                  coverage: evidenceCoverage,
+                });
+
+                const gateResult = await generateCompletionGateSuggestion({
+                  task: sanitizedTask,
+                  sessionID,
+                  checklist: checklistResult.checklist!,
+                  evidence: executionEvidence,
+                  constraints: briefResult.brief?.constraints || [],
+                });
+
+                log("session.idle completion gate suggestion", {
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  task: sanitizedTask,
+                  usedAI: gateResult.usedAI,
+                  suggestion: gateResult.suggestion,
+                });
+
+                const checklistContext = formatChecklistForPrompt(
+                  sanitizedTask,
+                  checklistResult.checklist,
+                  evidenceCoverage,
+                  gateResult.suggestion
+                );
+
+                await ctx.client.session.prompt({
+                  path: { id: sessionID },
+                  body: {
+                    parts: [
+                      {
+                        id: `prt-checklist-${Date.now()}`,
+                        type: "text",
+                        text: checklistContext,
+                      },
+                    ],
+                    noReply: true,
+                  },
+                });
+
+                log("session.idle checklist injected", {
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  task: sanitizedTask,
+                  context: checklistContext,
+                });
+
+                const writebackResult = await writeCompletionChecklistMemories({
+                  task: sanitizedTask,
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  containerTag: tags.project.tag,
+                  checklist: checklistResult.checklist!,
+                  memoryRefs: checklistResult.memoryRefs,
+                  constraintKinds: briefResult.brief?.constraintKinds,
+                  evidence: executionEvidence,
+                  projectInfo: {
+                    displayName: tags.project.displayName,
+                    userName: tags.project.userName,
+                    userEmail: tags.project.userEmail,
+                    projectPath: tags.project.projectPath,
+                    projectName: tags.project.projectName,
+                    gitRepoUrl: tags.project.gitRepoUrl,
+                  },
+                });
+
+                log("session.idle checklist writeback", {
+                  sessionID,
+                  promptId: pendingPrompt.id,
+                  task: sanitizedTask,
+                  usedAI: writebackResult.usedAI,
+                  skipped: writebackResult.skipped,
+                  success: writebackResult.success,
+                  writtenMemoryIds: writebackResult.writtenMemoryIds,
+                  drafts: writebackResult.drafts,
+                  error: writebackResult.error,
+                });
+              }
+            }
 
             // 仅由服务端所有权的节点执行全局维护任务，避免多实例重复操作
-            if (webServer?.isServerOwner()) {
+            if (CONFIG.autoCaptureEnabled && webServer?.isServerOwner()) {
               // 执行用户画像学习流程，基于近期交互行为更新用户偏好模型
               await performUserProfileLearning(ctx, directory);
               // 动态导入数据清理服务实例，加载过期数据清理能力
@@ -1087,6 +1317,255 @@ function formatSearchResults(query: string, results: any, limit?: number): strin
       similarity: Math.round(r.similarity * 100),
     })),
   });
+}
+
+function formatChecklistForPrompt(
+  task: string,
+  checklist:
+    | {
+        successCriteria: string[];
+        verificationHints: string[];
+        evidenceTemplates: Array<{ type: string; title: string; payload: string }>;
+        remainingRisks: string[];
+      }
+    | undefined,
+  evidenceCoverage:
+    | Array<{
+        status: "hit" | "miss";
+        template: { type: string; title: string; payload: string };
+        matchedEvidence?: { title: string; payload: string };
+      }>
+    | undefined,
+  gateSuggestion:
+    | {
+        status: string;
+        criteria_check: Array<{
+          criteria: string;
+          status: string;
+          reason: string;
+          evidenceTypes: string[];
+        }>;
+        constraint_check: Array<{ constraint: string; status: string; reason: string }>;
+        summary: string;
+        next_actions: string[];
+      }
+    | undefined
+): string {
+  const lines = ["<completion_checklist>", `Task: ${task}`];
+
+  if (checklist?.successCriteria?.length) {
+    lines.push("Success Criteria:");
+    checklist.successCriteria.forEach((item) => lines.push(`- ${item}`));
+  }
+
+  if (checklist?.verificationHints?.length) {
+    lines.push("Verification Hints:");
+    checklist.verificationHints.forEach((item) => lines.push(`- ${item}`));
+  }
+
+  if (checklist?.evidenceTemplates?.length) {
+    lines.push("Evidence Templates:");
+    checklist.evidenceTemplates.forEach((item) =>
+      lines.push(`- [${item.type}] ${item.title}${item.payload ? `: ${item.payload}` : ""}`)
+    );
+  }
+
+  if (evidenceCoverage?.length) {
+    lines.push("Evidence Coverage:");
+    evidenceCoverage.forEach((item) => {
+      const marker = item.status === "hit" ? "hit" : "miss";
+      const matched = item.matchedEvidence
+        ? ` => ${item.matchedEvidence.title}${item.matchedEvidence.payload ? `: ${item.matchedEvidence.payload}` : ""}`
+        : "";
+      lines.push(`- [${marker}] [${item.template.type}] ${item.template.title}${matched}`);
+    });
+  }
+
+  if (gateSuggestion) {
+    lines.push("<completion_gate_suggestion>");
+    lines.push(`status: ${gateSuggestion.status}`);
+    if (gateSuggestion.summary) {
+      lines.push(`summary: ${gateSuggestion.summary}`);
+    }
+    if (gateSuggestion.criteria_check?.length) {
+      lines.push("criteria_check:");
+      gateSuggestion.criteria_check.forEach((item) => {
+        lines.push(`- ${item.criteria}: ${item.status} (${item.reason})`);
+      });
+    }
+    if (gateSuggestion.constraint_check?.length) {
+      lines.push("constraint_check:");
+      gateSuggestion.constraint_check.forEach((item) => {
+        lines.push(`- ${item.constraint}: ${item.status} (${item.reason})`);
+      });
+    }
+    if (gateSuggestion.next_actions?.length) {
+      lines.push("next_actions:");
+      gateSuggestion.next_actions.forEach((item) => lines.push(`- ${item}`));
+    }
+    lines.push("</completion_gate_suggestion>");
+  }
+
+  if (checklist?.remainingRisks?.length) {
+    lines.push("Remaining Risks:");
+    checklist.remainingRisks.forEach((item) => lines.push(`- ${item}`));
+  }
+
+  lines.push("</completion_checklist>");
+
+  return lines.join("\n");
+}
+
+function evaluateEvidenceTemplateCoverage(
+  evidenceTemplates: Array<{ type: string; title: string; payload: string }> | undefined,
+  executionEvidence: any
+):
+  | Array<{
+      status: "hit" | "miss";
+      template: { type: string; title: string; payload: string };
+      matchedEvidence?: { title: string; payload: string };
+    }>
+  | undefined {
+  if (!evidenceTemplates?.length) {
+    return undefined;
+  }
+
+  const evidenceItems: Array<{ type: string; title: string; payload: string }> =
+    executionEvidence?.evidenceItems || [];
+
+  return evidenceTemplates.map((template) => {
+    const sameTypeItems = evidenceItems.filter((item) => item.type === template.type);
+    if (sameTypeItems.length === 0) {
+      return { status: "miss" as const, template };
+    }
+
+    const bestMatch = pickBestEvidenceMatch(template, sameTypeItems);
+
+    return {
+      status: "hit" as const,
+      template,
+      matchedEvidence: {
+        title: bestMatch.title,
+        payload: bestMatch.payload,
+      },
+    };
+  });
+}
+
+function pickBestEvidenceMatch(
+  template: { type: string; title: string; payload: string },
+  candidates: Array<{ type: string; title: string; payload: string }>
+): { title: string; payload: string } {
+  const first = candidates[0];
+  if (!first) {
+    return { title: "", payload: "" };
+  }
+
+  if (candidates.length === 1) {
+    return { title: first.title, payload: first.payload };
+  }
+
+  const terms = extractTemplateMatchTerms(template);
+  if (terms.length === 0) {
+    return { title: first.title, payload: first.payload };
+  }
+
+  let best = first;
+  let bestScore = -1;
+
+  for (const candidate of candidates) {
+    const score = scoreEvidenceCandidate(terms, candidate);
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return { title: best.title, payload: best.payload };
+}
+
+function extractTemplateMatchTerms(template: {
+  type: string;
+  title: string;
+  payload: string;
+}): string[] {
+  const text = `${template.title}\n${template.payload}`.toLowerCase().trim();
+  if (!text) {
+    return [];
+  }
+
+  const terms: string[] = [];
+
+  const commandMatch = text.match(
+    /\b(bun test|npm test|pnpm test|yarn test|vitest|jest|mocha|pytest|cargo test|go test|playwright)\b/
+  );
+  if (commandMatch?.[1]) {
+    terms.push(commandMatch[1]);
+  }
+
+  const httpMatch = text.match(/\b(get|post|put|delete|patch)\s+([^\s]+)/);
+  if (httpMatch?.[0]) {
+    terms.push(httpMatch[0]);
+  }
+
+  tokenize(text).forEach((token) => terms.push(token));
+
+  return uniqueStrings(terms);
+}
+
+function scoreEvidenceCandidate(
+  terms: string[],
+  candidate: { title: string; payload: string }
+): number {
+  const text = `${candidate.title}\n${candidate.payload}`.toLowerCase();
+  let score = 0;
+
+  for (const term of terms) {
+    if (term.length < 2) continue;
+    if (text.includes(term)) {
+      score += term.includes(" ") || term.includes("/") ? 3 : 1;
+    }
+  }
+
+  return score;
+}
+
+function tokenize(text: string): string[] {
+  return text
+    .split(/[^a-z0-9/_-]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3)
+    .slice(0, 20);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.length > 0))];
+}
+
+// memory 工具等待后台 warmup 的最大时长；embedding 模型首次加载可能需要 30-60s
+const MEMORY_TOOL_WARMUP_TIMEOUT_MS = 90_000;
+
+// 等待 warmup promise 完成（复用 initPromise，不重复加载模型），超时或失败时回传真实原因，便于调用方暴露给用户
+async function waitForMemoryReady(
+  timeoutMs = MEMORY_TOOL_WARMUP_TIMEOUT_MS
+): Promise<{ ready: boolean; error?: string }> {
+  try {
+    await Promise.race([
+      memoryClient.warmup(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("warmup timeout")), timeoutMs)
+      ),
+    ]);
+    const ready = memoryClient.getStatus().ready;
+    return { ready, error: ready ? undefined : "warmup resolved but service not ready" };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log("memory tool warmup wait failed", {
+      error: errorMsg,
+      status: JSON.stringify(memoryClient.getStatus()),
+    });
+    return { ready: memoryClient.getStatus().ready, error: errorMsg };
+  }
 }
 
 // 会话压缩记忆格式化函数：将历史记忆数组转换为Markdown格式的统一上下文文本，用于会话历史回填

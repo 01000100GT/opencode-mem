@@ -1,4 +1,14 @@
 import type { PluginInput } from "@opencode-ai/plugin";
+import {
+  MEMORY_CONSTRAINT_KINDS,
+  MEMORY_DECISION_TAGS,
+  MEMORY_ENTITY_TYPES,
+  MEMORY_MEM_TYPES,
+  type CognitiveMemoryType,
+  type ConstraintKind,
+  type DecisionTag,
+  type MemoryEntity,
+} from "../types/index.js";
 import { memoryClient } from "./client.js";
 import { getTags } from "./tags.js";
 import { log, isDiagEnabled, diagWarn } from "./logger.js";
@@ -12,9 +22,39 @@ interface ToolCallInfo {
 }
 
 const MAX_TOOL_INPUT_LENGTH = 100;
+const MAX_ENTITIES_PER_MEMORY = 8;
 const RETRY_BASE_DELAY_MS = 2000;
+const VALID_MEM_TYPES = new Set<string>(MEMORY_MEM_TYPES);
+const VALID_ENTITY_TYPES = new Set<string>(MEMORY_ENTITY_TYPES);
+const VALID_CONSTRAINT_KINDS = new Set<string>(MEMORY_CONSTRAINT_KINDS);
+const VALID_DECISION_TAGS = new Set<string>(MEMORY_DECISION_TAGS);
 
 let isCaptureRunning = false;
+
+interface RawMemoryEntity {
+  entity?: string;
+  entity_type?: string;
+}
+
+interface RawSummaryResult {
+  summary: string;
+  type: string;
+  tags: string[];
+  mem_types?: string[];
+  entities?: RawMemoryEntity[];
+  constraint_kinds?: string[];
+  decision_tags?: string[];
+}
+
+interface SummaryResult {
+  summary: string;
+  type: string;
+  tags: string[];
+  memTypes: CognitiveMemoryType[];
+  entities: MemoryEntity[];
+  constraintKinds: ConstraintKind[];
+  decisionTags: DecisionTag[];
+}
 
 export async function performAutoCapture(
   ctx: PluginInput,
@@ -97,7 +137,7 @@ async function capturePrompt(
           latestMemory
         );
 
-        let summaryResult: { summary: string; type: string; tags: string[] } | null;
+        let summaryResult: SummaryResult | null;
         try {
           summaryResult = await generateSummary(context, sessionID, prompt.content, prompt);
         } catch (error) {
@@ -128,6 +168,10 @@ async function capturePrompt(
           sessionID,
           promptId: prompt.id,
           captureTimestamp: Date.now(),
+          mem_types: summaryResult.memTypes,
+          entities: summaryResult.entities,
+          constraint_kinds: summaryResult.constraintKinds,
+          decision_tags: summaryResult.decisionTags,
           displayName: tags.project.displayName,
           userName: tags.project.userName,
           userEmail: tags.project.userEmail,
@@ -348,7 +392,7 @@ async function generateSummary(
   sessionID: string,
   userPrompt: string,
   prompt?: { providerId: string | null; modelId: string | null }
-): Promise<{ summary: string; type: string; tags: string[] } | null> {
+): Promise<SummaryResult | null> {
   // Opencode provider path (when opencodeProvider + opencodeModel configured)
   if (CONFIG.opencodeProvider && CONFIG.opencodeModel) {
     try {
@@ -402,7 +446,13 @@ RULES:
 3. NO meta-commentary or behavior analysis
 4. Include specific file names, functions, technical details
 5. Generate 2-4 technical tags (e.g., "react", "auth", "bug-fix")
-6. You MUST write the summary in ${langName}.
+6. Classify each memory using zero or more mem_types from: ${MEMORY_MEM_TYPES.join(", ")}
+7. Extract high-value entities using ONLY these entity_type values: ${MEMORY_ENTITY_TYPES.join(", ")}
+8. If the conversation contains a stable project decision or hard constraint, classify it using zero or more constraint_kinds from: ${MEMORY_CONSTRAINT_KINDS.join(", ")}
+9. If the conversation contains a stable project decision, classify it using zero or more decision_tags from: ${MEMORY_DECISION_TAGS.join(", ")}
+10. Only extract File, Function, and Class when the conversation names them explicitly
+11. Return empty arrays when mem_types, entities, constraint_kinds, or decision_tags are missing
+12. You MUST write the summary in ${langName}.
 
 FORMAT:
 ## Request
@@ -416,13 +466,21 @@ CAPTURE if: code changed, bug fixed, feature added, decision made`;
 
       const aiPrompt = `${context}
 
-Analyze this conversation. If it contains technical work (code, bugs, features, decisions), create a concise summary and relevant tags. If it's non-technical (greetings, casual chat, incomplete requests), return type="skip" with empty summary.`;
+Analyze this conversation. If it contains technical work (code, bugs, features, decisions), create a concise summary, relevant tags, mem_types, entities, and structured decision metadata. If it's non-technical (greetings, casual chat, incomplete requests), return type="skip" with empty summary and empty arrays.`;
 
       const { z } = await import("zod");
+      const entitySchema = z.object({
+        entity: z.string(),
+        entity_type: z.string(),
+      });
       const schema = z.object({
         summary: z.string(),
         type: z.string(),
         tags: z.array(z.string()),
+        mem_types: z.array(z.string()).default([]),
+        entities: z.array(entitySchema).default([]),
+        constraint_kinds: z.array(z.string()).default([]),
+        decision_tags: z.array(z.string()).default([]),
       });
 
       const result = await generateStructuredOutput({
@@ -434,11 +492,7 @@ Analyze this conversation. If it contains technical work (code, bugs, features, 
         schema,
       });
 
-      return {
-        summary: result.summary,
-        type: result.type,
-        tags: (result.tags || []).map((t: string) => t.toLowerCase().trim()),
-      };
+      return normalizeSummaryResult(result);
     } catch (e) {
       log("auto-capture: opencode provider failed, falling back to external API", {
         error: String(e),
@@ -474,7 +528,13 @@ RULES:
 3. NO meta-commentary or behavior analysis
 4. Include specific file names, functions, technical details
 5. Generate 2-4 technical tags (e.g., "react", "auth", "bug-fix")
-6. You MUST write the summary in ${langName}.
+6. Classify each memory using zero or more mem_types from: ${MEMORY_MEM_TYPES.join(", ")}
+7. Extract high-value entities using ONLY these entity_type values: ${MEMORY_ENTITY_TYPES.join(", ")}
+8. If the conversation contains a stable project decision or hard constraint, classify it using zero or more constraint_kinds from: ${MEMORY_CONSTRAINT_KINDS.join(", ")}
+9. If the conversation contains a stable project decision, classify it using zero or more decision_tags from: ${MEMORY_DECISION_TAGS.join(", ")}
+10. Only extract File, Function, and Class when the conversation names them explicitly
+11. Return empty arrays when mem_types, entities, constraint_kinds, or decision_tags are missing
+12. You MUST write the summary in ${langName}.
 
 FORMAT:
 ## Request
@@ -488,7 +548,7 @@ CAPTURE if: code changed, bug fixed, feature added, decision made`;
 
   const aiPrompt = `${context}
 
-Analyze this conversation. If it contains technical work (code, bugs, features, decisions), create a concise summary and relevant tags. If it's non-technical (greetings, casual chat, incomplete requests), return type="skip" with empty summary.`;
+Analyze this conversation. If it contains technical work (code, bugs, features, decisions), create a concise summary, relevant tags, mem_types, entities, and structured decision metadata. If it's non-technical (greetings, casual chat, incomplete requests), return type="skip" with empty summary and empty arrays.`;
 
   const toolSchema = {
     type: "function" as const,
@@ -512,6 +572,39 @@ Analyze this conversation. If it contains technical work (code, bugs, features, 
             items: { type: "string" },
             description: "List of 2-4 technical tags related to the memory",
           },
+          mem_types: {
+            type: "array",
+            items: { type: "string" },
+            description: `Zero or more cognitive memory types from: ${MEMORY_MEM_TYPES.join(", ")}`,
+          },
+          entities: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                entity: {
+                  type: "string",
+                  description: "Entity name that appeared explicitly in the conversation",
+                },
+                entity_type: {
+                  type: "string",
+                  description: `Entity type from: ${MEMORY_ENTITY_TYPES.join(", ")}`,
+                },
+              },
+              required: ["entity", "entity_type"],
+            },
+            description: "Structured entities extracted from the conversation",
+          },
+          constraint_kinds: {
+            type: "array",
+            items: { type: "string" },
+            description: `Zero or more hard constraint kinds from: ${MEMORY_CONSTRAINT_KINDS.join(", ")}`,
+          },
+          decision_tags: {
+            type: "array",
+            items: { type: "string" },
+            description: `Zero or more stable decision tags from: ${MEMORY_DECISION_TAGS.join(", ")}`,
+          },
         },
         required: ["summary", "type", "tags"],
       },
@@ -524,9 +617,131 @@ Analyze this conversation. If it contains technical work (code, bugs, features, 
     throw new Error(result.error || "Failed to generate summary");
   }
 
+  return normalizeSummaryResult(result.data as RawSummaryResult);
+}
+
+function normalizeSummaryResult(result: RawSummaryResult): SummaryResult {
   return {
-    summary: result.data.summary,
-    type: result.data.type,
-    tags: (result.data.tags || []).map((t: string) => t.toLowerCase().trim()),
+    summary: result.summary,
+    type: result.type,
+    tags: normalizeTags(result.tags),
+    memTypes: normalizeMemTypes(result.mem_types),
+    entities: normalizeEntities(result.entities),
+    constraintKinds: normalizeConstraintKinds(result.constraint_kinds),
+    decisionTags: normalizeDecisionTags(result.decision_tags),
   };
+}
+
+function normalizeTags(tags: string[] | undefined): string[] {
+  if (!Array.isArray(tags)) {
+    return [];
+  }
+
+  const normalized = new Set<string>();
+  for (const tag of tags) {
+    if (typeof tag !== "string") {
+      continue;
+    }
+    const cleaned = tag.toLowerCase().trim();
+    if (cleaned) {
+      normalized.add(cleaned);
+    }
+  }
+
+  return [...normalized];
+}
+
+function normalizeMemTypes(memTypes: string[] | undefined): CognitiveMemoryType[] {
+  if (!Array.isArray(memTypes)) {
+    return [];
+  }
+
+  const normalized = new Set<CognitiveMemoryType>();
+  for (const memType of memTypes) {
+    if (typeof memType !== "string") {
+      continue;
+    }
+    const cleaned = memType.toLowerCase().trim();
+    if (VALID_MEM_TYPES.has(cleaned)) {
+      normalized.add(cleaned as CognitiveMemoryType);
+    }
+  }
+
+  return [...normalized];
+}
+
+function normalizeEntities(entities: RawMemoryEntity[] | undefined): MemoryEntity[] {
+  if (!Array.isArray(entities)) {
+    return [];
+  }
+
+  const normalized: MemoryEntity[] = [];
+  const seen = new Set<string>();
+
+  for (const item of entities) {
+    if (!item || typeof item.entity !== "string" || typeof item.entity_type !== "string") {
+      continue;
+    }
+
+    const entity = item.entity.trim();
+    const entityType = item.entity_type.trim();
+    if (!entity || !VALID_ENTITY_TYPES.has(entityType)) {
+      continue;
+    }
+
+    const dedupeKey = `${entityType}:${entity.toLowerCase()}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    normalized.push({
+      entity,
+      entity_type: entityType as MemoryEntity["entity_type"],
+    });
+
+    if (normalized.length >= MAX_ENTITIES_PER_MEMORY) {
+      break;
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeConstraintKinds(input: string[] | undefined): ConstraintKind[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const normalized = new Set<ConstraintKind>();
+  for (const item of input) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const cleaned = item.trim().toLowerCase();
+    if (VALID_CONSTRAINT_KINDS.has(cleaned)) {
+      normalized.add(cleaned as ConstraintKind);
+    }
+  }
+
+  return [...normalized];
+}
+
+function normalizeDecisionTags(input: string[] | undefined): DecisionTag[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const normalized = new Set<DecisionTag>();
+  for (const item of input) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const cleaned = item.trim().toLowerCase();
+    if (VALID_DECISION_TAGS.has(cleaned)) {
+      normalized.add(cleaned as DecisionTag);
+    }
+  }
+
+  return [...normalized];
 }
