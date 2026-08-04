@@ -1,0 +1,30 @@
+timestamp=2026-08-04T08:56:19.946Z level=INFO run=b7d7f972 message="creating instance" directory=/private/tmp/opencode-mem-demo
+timestamp=2026-08-04T08:56:19.948Z level=INFO run=b7d7f972 message=fromDirectory directory=/private/tmp/opencode-mem-demo
+timestamp=2026-08-04T08:56:19.963Z level=INFO run=b7d7f972 message=bootstrapping directory=/private/tmp/opencode-mem-demo
+timestamp=2026-08-04T08:56:19.992Z level=INFO run=b7d7f972 message=loading path=/Users/sss/.config/opencode/config.json
+timestamp=2026-08-04T08:56:19.993Z level=INFO run=b7d7f972 message=loading path=/Users/sss/.config/opencode/opencode.json
+timestamp=2026-08-04T08:56:20.009Z level=INFO run=b7d7f972 message=loading path=/Users/sss/.config/opencode/opencode.jsonc
+timestamp=2026-08-04T08:56:20.020Z level=INFO run=b7d7f972 message=loading path=/private/tmp/opencode-mem-demo/opencode.json
+timestamp=2026-08-04T08:56:20.051Z level=DEBUG run=b7d7f972 message="loading config from /private/tmp/opencode-mem-demo/.opencode/opencode.json"
+timestamp=2026-08-04T08:56:20.051Z level=INFO run=b7d7f972 message=loading path=/private/tmp/opencode-mem-demo/.opencode/opencode.json
+timestamp=2026-08-04T08:56:20.052Z level=DEBUG run=b7d7f972 message="loading config from /private/tmp/opencode-mem-demo/.opencode/opencode.jsonc"
+timestamp=2026-08-04T08:56:20.052Z level=INFO run=b7d7f972 message=loading path=/private/tmp/opencode-mem-demo/.opencode/opencode.jsonc
+timestamp=2026-08-04T08:56:20.058Z level=DEBUG run=b7d7f972 message="loading config from /Users/sss/.opencode/opencode.json"
+timestamp=2026-08-04T08:56:20.058Z level=INFO run=b7d7f972 message=loading path=/Users/sss/.opencode/opencode.json
+timestamp=2026-08-04T08:56:20.099Z level=DEBUG run=b7d7f972 message="loading config from /Users/sss/.opencode/opencode.jsonc"
+timestamp=2026-08-04T08:56:20.099Z level=INFO run=b7d7f972 message=loading path=/Users/sss/.opencode/opencode.jsonc
+timestamp=2026-08-04T08:56:20.255Z level=INFO run=b7d7f972 message="enabled LSP servers" serverIds="zls, yaml-ls, vue, typescript, tinymist, texlab, terraform, svelte, sourcekit-lsp, rust, ruby-lsp, razor, pyright, prisma, php intelephense, oxlint, ocaml-lsp, nixd, lua-ls, kotlin-ls, julials, jdtls, haskell-language-server, gopls, gleam, fsharp, elixir-ls, eslint, dockerfile, deno, dart, clojure-lsp, clangd, csharp, biome, bash, astro"
+timestamp=2026-08-04T08:56:20.257Z level=INFO run=b7d7f972 message="all formatters are disabled"
+timestamp=2026-08-04T08:56:20.257Z level=INFO run=b7d7f972 message=init
+timestamp=2026-08-04T08:56:20.450Z level=INFO run=b7d7f972 message=created id=ses_034030b1dffeOVFbaNS2uZ5Bg5 slug=silent-knight version=1.18.12 projectID=global directory=/private/tmp/opencode-mem-demo path=private/tmp/opencode-mem-demo workspaceID=undefined parentID=undefined title="New session - 2026-08-04T08:56:20.450Z" agent=undefined model=undefined metadata=undefined permission="[{\"permission\":\"question\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_enter\",\"pattern\":\"*\",\"action\":\"deny\"},{\"permission\":\"plan_exit\",\"pattern\":\"*\",\"action\":\"deny\"}]" cost=0 tokens.input=0 tokens.output=0 tokens.reasoning=0 tokens.cache.read=0 tokens.cache.write=0 time.created=1785833780450 time.updated=1785833780450
+timestamp=2026-08-04T08:56:20.482Z level=INFO run=b7d7f972 message="event connected"
+timestamp=2026-08-04T08:56:20.689Z level=WARN run=b7d7f972 message="skill path not found" path=/private/tmp/skills
+timestamp=2026-08-04T08:56:20.703Z level=ERROR run=b7d7f972 message=failed ref=err_e22fc161 error="Error: default agent \"build\" not found" cause="Error: default agent \"build\" not found\n    at <anonymous> (/$bunfs/root/chunk-z8kyvgbv.js:171:4828)\n    at Agent.defaultInfo (/$bunfs/root/chunk-245gja7m.js:1085:1928)\n    at Agent.defaultInfo (definition) (/$bunfs/root/chunk-z8kyvgbv.js:171:5475)\n    at SessionPrompt.createUserMessage (/$bunfs/root/chunk-245gja7m.js:1085:9954)\n    at SessionPrompt.createUserMessage (definition) (/$bunfs/root/chunk-245gja7m.js:1085:1827)\n    at SessionPrompt.prompt (/$bunfs/root/chunk-p14d7z5e.js:4:13220)\n    at SessionPrompt.prompt (definition) (/$bunfs/root/chunk-245gja7m.js:1085:9838)\n    at SessionHttpApi.prompt (/$bunfs/root/chunk-p14d7z5e.js:2:84381)\n    at SessionHttpApi.prompt (definition) (/$bunfs/root/chunk-p14d7z5e.js:4:13133)"
+[91m[1mError: [0m{
+  "name": "UnknownError",
+  "data": {
+    "message": "Unexpected server error. Check server logs for details.",
+    "ref": "err_e22fc161"
+  }
+}
+timestamp=2026-08-04T08:56:20.706Z level=INFO run=b7d7f972 message="disposing instance" directory=/private/tmp/opencode-mem-demo

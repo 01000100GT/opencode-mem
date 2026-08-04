@@ -1,0 +1,7 @@
+Project 使用 `vitest`（`package.json` 中的 test 脚本），我直接创建文件并用 vitest 运行。
+全部通过。两个文件中：
+
+- **`src/sum.ts`** — 导出 `sum(a, b)` 返回 `a + b`
+- **`tests/sum.test.ts`** — 用 vitest 验证了 `sum(1, 2) === 3` 和 `sum(-5, 5) === 0`
+
+注：项目配置的是 `vitest`，`npm test`（即 `vitest run`）已运行通过。

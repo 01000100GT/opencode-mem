@@ -1,0 +1,5 @@
+Using `systematic-debugging` skill isn't needed here — this is a straightforward coding task. Let me check the project structure first.
+全部完成，`bun test` 4 个测试全部通过：
+
+- `src/multiply.ts` — `multiply(a, b)` 返回 `a * b`
+- `tests/multiply.test.ts` — 验证 `multiply(3, 4) === 12` 和 `multiply(0, 5) === 0`

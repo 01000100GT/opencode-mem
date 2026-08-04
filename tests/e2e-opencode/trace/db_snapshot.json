@@ -1,0 +1,80 @@
+{
+  "generatedAt": "2026-08-04T09:05:14.088Z",
+  "dbPath": "/Users/sss/.opencode-mem-demo-data/ai-sessions.db",
+  "schema": {
+    "ai_messages": "CREATE TABLE ai_messages (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        ai_session_id TEXT NOT NULL,\n        sequence INTEGER NOT NULL,\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        tool_calls TEXT,\n        tool_call_id TEXT,\n        content_blocks TEXT,\n        created_at INTEGER NOT NULL,\n        FOREIGN KEY (ai_session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE\n      )",
+    "ai_sessions": "CREATE TABLE ai_sessions (\n        id TEXT PRIMARY KEY,\n        provider TEXT NOT NULL,\n        session_id TEXT NOT NULL,\n        conversation_id TEXT,\n        metadata TEXT,\n        created_at INTEGER NOT NULL,\n        updated_at INTEGER NOT NULL,\n        expires_at INTEGER NOT NULL\n      )",
+    "sqlite_sequence": "CREATE TABLE sqlite_sequence(name,seq)"
+  },
+  "counts": {
+    "ai_messages": 4,
+    "ai_sessions": 1,
+    "sqlite_sequence": 1
+  },
+  "tables": {
+    "ai_messages": [
+      {
+        "id": 1,
+        "ai_session_id": "sess_1785833992533_txq79qc",
+        "sequence": 0,
+        "role": "system",
+        "content": "You generate a structured task brief for a coding assistant.\n\nRules:\n1. Return valid JSON only.\n2. Match the task language.\n3. Stay grounded in recalled memories and the fallback draft.\n4. Keep outputs concise, concrete, and testable.\n5. If a field is unsupported, return an empty array instead of guessing.",
+        "tool_calls": null,
+        "tool_call_id": null,
+        "content_blocks": null,
+        "created_at": 1785833992534
+      },
+      {
+        "id": 2,
+        "ai_session_id": "sess_1785833992533_txq79qc",
+        "sequence": 1,
+        "role": "user",
+        "content": "Task:\n\"在 src/ 中添加一个 multiply.ts 函数，导出 multiply(a, b) 返回两数之积。tests/ 中加 multiply.test.ts 用 vitest 验证 multiply(3, 4)===12 与 multiply(0, 5)===0。最后执行 bun test 确保全部通过。\"\n\nRecalled memories:\n(no recalled memories)\n\nFallback draft:\n{\n  \"taskGoal\": \"\\\"在 src/ 中添加一个 multiply.ts 函数，导出 multiply(a, b) 返回两数之积。tests/ 中加 multiply.test.ts 用 vitest 验证 multiply(3, 4)===12 与 multiply(0, 5)===0。最后执行 bun test 确保全部通过。\\\"\",\n  \"relatedFiles\": [],\n  \"relatedSymbols\": [],\n  \"historicalDecisions\": [],\n  \"constraintKinds\": [],\n  \"constraints\": [],\n  \"userPreferences\": [],\n  \"risks\": [\n    \"尚未收集到明确的历史风险，需补最小验证闭环\"\n  ],\n  \"successCriteria\": [\n    \"完成任务目标：\\\"在 src/ 中添加一个 multiply.ts 函数，导出 multiply(a, b) 返回两数之积。tests/ 中加 multiply.test.ts 用 vitest 验证 multiply(3, 4)===12 与 multiply(0, 5)===0。最后执行 bun test 确保全部通过。\\\"\",\n    \"验证本次修改没有破坏现有核心流程\"\n  ]\n}\n\nReturn JSON with:\n- taskGoal\n- relatedFiles[]\n- relatedSymbols[]\n- historicalDecisions[]\n- constraintKinds[] (allowed values: preserve_db_schema, preserve_api_contract, preserve_ui, no_new_table, minimize_change)\n- constraints[]\n- userPreferences[]\n- risks[]\n- successCriteria[]",
+        "tool_calls": null,
+        "tool_call_id": null,
+        "content_blocks": null,
+        "created_at": 1785833992534
+      },
+      {
+        "id": 3,
+        "ai_session_id": "sess_1785833992533_txq79qc",
+        "sequence": 2,
+        "role": "assistant",
+        "content": "",
+        "tool_calls": "[{\"id\":\"call_038b3541d31641b7b35482fb\",\"index\":0,\"type\":\"function\",\"function\":{\"name\":\"generate_task_brief\",\"arguments\":\"{\\\"taskGoal\\\": \\\"在 src/ 中添加一个 multiply.ts 函数，导出 multiply(a, b) 返回两数之积。tests/ 中加 multiply.test.ts 用 vitest 验证 multiply(3, 4)===12 与 multiply(0, 5)===0。最后执行 bun test 确保全部通过。\\\", \\\"relatedFiles\\\": [\\\"src/multiply.ts\\\", \\\"tests/multiply.test.ts\\\"], \\\"relatedSymbols\\\": [\\\"multiply\\\"], \\\"historicalDecisions\\\": [], \\\"constraintKinds\\\": [\\\"minimize_change\\\"], \\\"constraints\\\": [\\\"使用 TypeScript 编写\\\", \\\"使用 vitest 进行单元测试\\\", \\\"使用 bun 运行测试\\\"], \\\"userPreferences\\\": [], \\\"risks\\\": [\\\"确保项目已配置 bun 和 vitest 环境\\\"], \\\"successCriteria\\\": [\\\"src/multiply.ts 正确导出 multiply 函数\\\", \\\"tests/multiply.test.ts 包含针对 multiply(3, 4) 和 multiply(0, 5) 的测试用例\\\", \\\"执行 bun test 后所有测试通过\\\"]}\"}}]",
+        "tool_call_id": null,
+        "content_blocks": null,
+        "created_at": 1785833997833
+      },
+      {
+        "id": 4,
+        "ai_session_id": "sess_1785833992533_txq79qc",
+        "sequence": 3,
+        "role": "tool",
+        "content": "{\"success\":true}",
+        "tool_calls": null,
+        "tool_call_id": "call_038b3541d31641b7b35482fb",
+        "content_blocks": null,
+        "created_at": 1785833997834
+      }
+    ],
+    "ai_sessions": [
+      {
+        "id": "sess_1785833992533_txq79qc",
+        "provider": "openai-chat",
+        "session_id": "ses_033ffdb95ffeza3rA5j0YEOFBf",
+        "conversation_id": null,
+        "metadata": "{}",
+        "created_at": 1785833992533,
+        "updated_at": 1785833992533,
+        "expires_at": 1786438792533
+      }
+    ],
+    "sqlite_sequence": [
+      {
+        "name": "ai_messages",
+        "seq": 4
+      }
+    ]
+  }
+}
