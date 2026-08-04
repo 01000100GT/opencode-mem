@@ -291,7 +291,7 @@ const DEFAULTS: Required<
   // 自动捕获流程中多轮AI分析的最大迭代次数，防止复杂场景下出现无限循环的推理调用
   autoCaptureMaxIterations: 5,
   // 单轮AI分析请求的超时时间，单位为毫秒，超过该时间会终止当前请求并重试
-  autoCaptureIterationTimeout: 30000,
+  autoCaptureIterationTimeout: 120000,
   // 自动捕获失败后的最大重试次数，针对网络波动、API限流等临时错误提升捕获成功率
   autoCaptureMaxRetries: 3,
   // 向量数据库后端加速模式，优先加载hnswlib-wasm向量库实现高性能检索，加载失败自动降级为精确扫描
@@ -639,8 +639,8 @@ const CONFIG_TEMPLATE = `{
   // Maximum iterations for multi-turn AI analysis (for openai-responses and anthropic)
   "autoCaptureMaxIterations": 5,
    
-  // Timeout per iteration in milliseconds (30 seconds default)
-  "autoCaptureIterationTimeout": 30000,
+  // Timeout per iteration in milliseconds (120 seconds default)
+  "autoCaptureIterationTimeout": 120000,
 
   // Maximum number of times to retry capturing a prompt if it fails (due to network, API errors, etc.)
   "autoCaptureMaxRetries": 3,

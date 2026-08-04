@@ -256,7 +256,9 @@ function buildFallbackSuggestion(request: CompletionGateAdvisorRequest): Complet
     buildFallbackConstraintCheck(constraint, request.evidence)
   );
 
-  const anyFail = criteria_check.some((item) => item.status === "fail");
+  const anyFail =
+    criteria_check.some((item) => item.status === "fail") ||
+    constraint_check.some((item) => item.status === "fail");
   const anyUnknown =
     criteria_check.some((item) => item.status === "unknown") ||
     constraint_check.some((item) => item.status === "unknown");
