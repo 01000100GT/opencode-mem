@@ -13,7 +13,7 @@ const Database = getDatabase();
 
 function createFailingBackend(): VectorBackend {
   return {
-    getBackendName: () => "usearch",
+    getBackendName: () => "hnswlib-wasm",
     insert: async () => {},
     insertBatch: async () => {},
     delete: async () => {},

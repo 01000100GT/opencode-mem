@@ -100,8 +100,8 @@ interface OpenCodeMemConfig {
   opencodeProvider?: string;
   // 与opencodeProvider配合使用的具体大语言模型名称，需匹配系统支持的模型标识
   opencodeModel?: string;
-  // 向量数据库后端模式，"usearch-first"优先使用usearch加速、"usearch"仅用usearch、"exact-scan"仅用精确扫描
-  vectorBackend?: "usearch-first" | "usearch" | "exact-scan";
+  // 向量数据库后端模式，"hnswlib-wasm-first"优先使用hnswlib-wasm加速、"hnswlib-wasm"仅用hnswlib-wasm、"exact-scan"仅用精确扫描
+  vectorBackend?: "hnswlib-wasm-first" | "hnswlib-wasm" | "exact-scan";
   // AI会话历史的保留天数，超过该期限的会话记录会被自动清理
   aiSessionRetentionDays?: number;
   // 是否启用Web服务器功能，开启后可通过浏览器访问记忆管理界面
@@ -252,8 +252,8 @@ const DEFAULTS: Required<
   opencodeProvider?: string;
   // 与OpenCode内置提供商配合使用的具体模型名称，需匹配系统支持的模型唯一标识
   opencodeModel?: string;
-  // 向量数据库的后端加速模式，支持优先使用usearch、仅用usearch、仅用精确扫描三种策略
-  vectorBackend?: "usearch-first" | "usearch" | "exact-scan";
+  // 向量数据库的后端加速模式，支持优先使用hnswlib-wasm、仅用hnswlib-wasm、仅用精确扫描三种策略
+  vectorBackend?: "hnswlib-wasm-first" | "hnswlib-wasm" | "exact-scan";
   // 自动生成记忆摘要的目标语言，支持auto自动检测或指定具体语言代码
   autoCaptureLanguage?: string;
   // 强制覆盖系统自动获取的用户邮箱地址，用于统一用户身份标识
@@ -294,8 +294,8 @@ const DEFAULTS: Required<
   autoCaptureIterationTimeout: 30000,
   // 自动捕获失败后的最大重试次数，针对网络波动、API限流等临时错误提升捕获成功率
   autoCaptureMaxRetries: 3,
-  // 向量数据库后端加速模式，优先加载usearch向量库实现高性能检索，加载失败自动降级为精确扫描
-  vectorBackend: "usearch-first",
+  // 向量数据库后端加速模式，优先加载hnswlib-wasm向量库实现高性能检索，加载失败自动降级为精确扫描
+  vectorBackend: "hnswlib-wasm-first",
   // AI会话历史的保留天数，超过该期限的会话记录会被自动清理，避免无效数据占用存储空间
   aiSessionRetentionDays: 7,
   // 是否开启Web管理服务器，开启后可通过浏览器访问可视化界面管理所有记忆数据
@@ -927,14 +927,14 @@ function buildConfig(fileConfig: OpenCodeMemConfig) {
       // 传入解析完成的记忆API访问密钥，已完成环境变量/本地文件等多来源的解析处理
       memoryApiKey,
     }),
-    // 向量数据库后端选择：优先使用用户配置的后端类型，未配置时默认采用"usearch-first"模式
+    // 向量数据库后端选择：优先使用用户配置的后端类型，未配置时默认采用"hnswlib-wasm-first"模式
     // 支持的三种后端模式：
-    // "usearch-first"：优先尝试使用usearch向量库，若加载失败自动降级到精确扫描
-    // "usearch"：强制使用usearch向量库，加载失败将抛出致命错误终止进程
+    // "hnswlib-wasm-first"：优先尝试使用hnswlib-wasm向量库，若加载失败自动降级到精确扫描
+    // "hnswlib-wasm"：强制使用hnswlib-wasm向量库，加载失败将抛出致命错误终止进程
     // "exact-scan"：全程使用暴力精确扫描，不依赖任何第三方向量加速库，兼容性最强但性能最低
-    vectorBackend: (fileConfig.vectorBackend ?? "usearch-first") as
-      | "usearch-first"
-      | "usearch"
+    vectorBackend: (fileConfig.vectorBackend ?? "hnswlib-wasm-first") as
+      | "hnswlib-wasm-first"
+      | "hnswlib-wasm"
       | "exact-scan",
     // AI会话记录的保留天数：优先使用用户配置值，未配置则采用默认保留周期，自动清理超时的历史会话数据，节省存储空间
     aiSessionRetentionDays: fileConfig.aiSessionRetentionDays ?? DEFAULTS.aiSessionRetentionDays,

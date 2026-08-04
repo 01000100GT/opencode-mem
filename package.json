@@ -47,15 +47,16 @@
     "access": "public"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@opencode-ai/plugin": "^1.3.0",
     "@opencode-ai/sdk": "^1.3.0",
     "franc-min": "^6.2.0",
+    "hnswlib-wasm": "^0.8.2",
     "iso-639-3": "^3.0.1",
-    "zod": "^4.3.6",
-    "@huggingface/transformers": "^4.2.0",
-    "usearch": "2.26.0"
+    "onnxruntime-web": "1.26.0-dev.20260416-b7804b056c",
+    "zod": "^4.3.6"
   },
-  "//": "Remove onnxruntime-node override after https://github.com/microsoft/onnxruntime/issues/27961 is resolved",
+  "//": "transformers v4 statically imports onnxruntime-node, but the ORT hook redirects runtime to onnxruntime-web (WASM). Pin 1.22.0 so the unused static import resolves on all platforms (1.24.3 dropped the macOS x64 binding).",
   "overrides": {
     "onnxruntime-node": "1.22.0"
   },
@@ -81,5 +82,9 @@
     "*.{ts,tsx,js,jsx,css,html,json,md}": [
       "prettier --write"
     ]
+  },
+  "patchedDependencies": {
+    "@huggingface/transformers@4.2.0": "patches/@huggingface%2Ftransformers@4.2.0.patch",
+    "hnswlib-wasm@0.8.2": "patches/hnswlib-wasm@0.8.2.patch"
   }
 }

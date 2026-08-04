@@ -48,7 +48,7 @@ export class VectorSearch {
   constructor(backend?: VectorBackend, fallbackBackend: VectorBackend = new ExactScanBackend()) {
     // 初始化主后端Promise：若传入自定义后端则包装为已解决的Promise
     // 注意：不传 backend 时不立即创建——延迟到首次 getBackend() 调用，
-    // 确保 CONFIG 已由 initConfig 初始化完毕（否则 vectorBackend 仍为默认值 "usearch-first"）
+    // 确保 CONFIG 已由 initConfig 初始化完毕（否则 vectorBackend 仍为默认值 "hnswlib-wasm-first"）
     if (backend) {
       this.backendPromise = Promise.resolve(backend);
     }

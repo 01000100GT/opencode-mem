@@ -6,8 +6,8 @@ import { log } from "../logger.js";
 import { ExactScanBackend } from "./exact-scan-backend.js";
 // 导入向量后端的通用接口类型与工厂函数配置选项类型定义
 import type { VectorBackend, VectorBackendFactoryOptions } from "./types.js";
-// 导入USearch高性能向量搜索引擎后端，提供近似最近邻搜索能力
-import { USearchBackend } from "./usearch-backend.js";
+// 导入hnswlib-wasm纯WASM向量后端，提供近似最近邻搜索能力
+import { HnswlibWasmBackend } from "./hnswlib-wasm-backend.js";
 
 // 实现支持故障降级的向量后端代理类，遵循统一的VectorBackend接口规范
 class FallbackAwareBackend implements VectorBackend {
@@ -16,9 +16,9 @@ class FallbackAwareBackend implements VectorBackend {
 
   // 构造降级感知后端实例，初始化核心配置与后端引用
   constructor(
-    // 后端运行策略：usearch-first表示优先尝试USearch，故障自动降级；usearch表示强制要求USearch，故障仅记录警告
-    private readonly strategy: "usearch-first" | "usearch",
-    // 主向量后端实例，通常为高性能的USearchBackend，作为优先使用的引擎
+    // 后端运行策略：hnswlib-wasm-first表示优先尝试hnswlib-wasm，故障自动降级；hnswlib-wasm表示强制要求hnswlib-wasm，故障仅记录警告
+    private readonly strategy: "hnswlib-wasm-first" | "hnswlib-wasm",
+    // 主向量后端实例，通常为高性能的HnswlibWasmBackend，作为优先使用的引擎
     private readonly primary: VectorBackend,
     // 兜底向量后端实例，固定为精确暴力扫描的ExactScanBackend，确保系统永远可用
     private readonly fallback: VectorBackend
@@ -95,8 +95,8 @@ class FallbackAwareBackend implements VectorBackend {
     log("Vector backend degraded to exact-scan", {
       // 记录当前使用的后端运行策略，用于区分强制绑定和自动降级场景的日志含义
       strategy: this.strategy,
-      // 根据策略动态设置日志级别：强制使用USearch时仅输出警告，自动降级场景输出普通信息
-      severity: this.strategy === "usearch" ? "warning" : "info",
+      // 根据策略动态设置日志级别：强制使用hnswlib-wasm时仅输出警告，自动降级场景输出普通信息
+      severity: this.strategy === "hnswlib-wasm" ? "warning" : "info",
       // 记录触发降级的具体操作类型，便于定位是搜索、重建还是其他流程引发的故障
       operation,
       // 将未知类型的错误转换为字符串，确保日志的可序列化性与可读性
@@ -105,16 +105,16 @@ class FallbackAwareBackend implements VectorBackend {
   }
 }
 
-// 默认的USearch可用性探测函数，用于在运行时检测usearch模块是否能正常加载
+// 默认的hnswlib-wasm可用性探测函数，用于在运行时检测hnswlib-wasm模块是否能正常加载
 // 返回Promise<boolean>，加载成功返回true，加载失败返回false
-async function defaultUSearchProbe(): Promise<boolean> {
-  // 尝试动态导入usearch模块，验证其在当前环境是否可用
+async function defaultHnswlibProbe(): Promise<boolean> {
+  // 尝试动态导入hnswlib-wasm模块，验证其在当前环境是否可用
   try {
-    await import("usearch");
-    // 模块导入成功，确认USearch可用，返回真值
+    await import("hnswlib-wasm/dist/hnswlib.js");
+    // 模块导入成功，确认hnswlib-wasm可用，返回真值
     return true;
   } catch {
-    // 模块导入失败，环境不支持USearch，返回假值
+    // 模块导入失败，环境不支持hnswlib-wasm，返回假值
     return false;
   }
 }
@@ -131,17 +131,17 @@ export async function createVectorBackend(
     return exactScanBackend;
   }
 
-  // 读取配置中的USearch可用性探测函数，未自定义则使用默认的模块导入探测逻辑
-  const probeUSearch = options.probeUSearch ?? defaultUSearchProbe;
-  // 执行USearch可用性探测，如果探测失败则进入降级流程
-  if (!(await probeUSearch())) {
-    // 如果配置要求强制使用USearch引擎，记录降级警告日志
-    if (options.vectorBackend === "usearch") {
+  // 读取配置中的hnswlib-wasm可用性探测函数，未自定义则使用默认的模块导入探测逻辑
+  const probeHnswlib = options.probeHnswlib ?? defaultHnswlibProbe;
+  // 执行hnswlib-wasm可用性探测，如果探测失败则进入降级流程
+  if (!(await probeHnswlib())) {
+    // 如果配置要求强制使用hnswlib-wasm引擎，记录降级警告日志
+    if (options.vectorBackend === "hnswlib-wasm") {
       log("Vector backend degraded to exact-scan", {
-        strategy: "usearch",
+        strategy: "hnswlib-wasm",
         severity: "warning",
         operation: "probe",
-        error: "USearch unavailable",
+        error: "hnswlib-wasm unavailable",
       });
     }
     // 直接返回兜底的精确扫描引擎实例，保障基础能力可用
@@ -149,25 +149,25 @@ export async function createVectorBackend(
   }
 
   try {
-    // 尝试获取自定义USearch后端实例，如果用户未提供自定义创建函数
-    // 则使用默认构造函数初始化标准USearch引擎，传入存储路径和向量维度核心配置
-    const usearchBackend =
-      options.createUSearchBackend?.() ??
-      new USearchBackend({
+    // 尝试获取自定义hnswlib后端实例，如果用户未提供自定义创建函数
+    // 则使用默认构造函数初始化标准hnswlib-wasm引擎，传入存储路径和向量维度核心配置
+    const hnswlibBackend =
+      options.createHnswlibBackend?.() ??
+      new HnswlibWasmBackend({
         baseDir: CONFIG.storagePath,
         dimensions: CONFIG.embeddingDimensions,
       });
 
     // 初始化降级感知代理后端，传入运行策略、主引擎实例和兜底引擎实例
     // 按照配置的故障转移策略封装双后端，对外暴露统一的向量操作接口
-    return new FallbackAwareBackend(options.vectorBackend, usearchBackend, exactScanBackend);
+    return new FallbackAwareBackend(options.vectorBackend, hnswlibBackend, exactScanBackend);
   } catch (error) {
-    // 记录USearch后端实例创建失败的降级事件，输出标准化日志信息
+    // 记录hnswlib后端实例创建失败的降级事件，输出标准化日志信息
     log("Vector backend degraded to exact-scan", {
       // 记录当前配置的后端运行策略，明确故障场景的触发条件
       strategy: options.vectorBackend,
-      // 根据策略动态设置日志级别：强制USearch场景输出警告，自动降级场景输出普通信息
-      severity: options.vectorBackend === "usearch" ? "warning" : "info",
+      // 根据策略动态设置日志级别：强制hnswlib-wasm场景输出警告，自动降级场景输出普通信息
+      severity: options.vectorBackend === "hnswlib-wasm" ? "warning" : "info",
       // 标记降级触发操作为后端实例创建，便于定位初始化阶段的故障根源
       operation: "create",
       // 将捕获的异常转换为字符串，确保日志可序列化且包含错误核心信息

@@ -22,6 +22,9 @@ function getTransformersPackageSpecifier(): string {
 
 async function ensureTransformersLoaded(): Promise<NonNullable<typeof _transformers>> {
   if (_transformers !== null) return _transformers;
+  // 强制 transformers.js v4 走纯 WASM 的 onnxruntime-web：通过全局 hook 覆盖其默认的
+  // onnxruntime-node（在无平台 binding 的环境 import 必失败），使 Node/Bun/Windows/Linux/ARM 行为一致。
+  await injectOnnxruntimeWebHook();
   const mod = (await import(getTransformersPackageSpecifier())) as HfTransformers;
   mod.env.allowLocalModels = true;
   mod.env.allowRemoteModels = true;
@@ -29,11 +32,25 @@ async function ensureTransformersLoaded(): Promise<NonNullable<typeof _transform
   // Keep ONNX WASM single-threaded for Bun/Node runtimes without SharedArrayBuffer.
   try {
     (mod.env as any).backends.onnx.wasm.numThreads = 1;
+    // 定向到 onnxruntime-web 自带的 wasm 文件，避免按脚本 URL 相对路径解析失败
+    (mod.env as any).backends.onnx.wasm.wasmPaths = new URL(
+      "../../node_modules/onnxruntime-web/dist/",
+      import.meta.url
+    ).href;
   } catch (e) {
-    log("Failed to set wasm.numThreads", { error: String(e) });
+    log("Failed to configure onnx wasm backend", { error: String(e) });
   }
   _transformers = mod;
   return _transformers!;
+}
+
+// 将 onnxruntime-web 注入全局 hook（幂等），必须在 import(@huggingface/transformers) 之前调用
+let _ortHookInjected = false;
+async function injectOnnxruntimeWebHook(): Promise<void> {
+  if (_ortHookInjected) return;
+  const ort = (await import("onnxruntime-web")) as typeof import("onnxruntime-web");
+  (globalThis as any)[Symbol.for("onnxruntime")] = ort;
+  _ortHookInjected = true;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

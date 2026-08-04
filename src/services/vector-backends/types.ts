@@ -61,10 +61,10 @@ export interface VectorBackend {
 
 // 向量后端工厂配置选项，用于控制向量后端实例的创建逻辑和选型策略
 export interface VectorBackendFactoryOptions {
-  // 指定优先使用的向量后端类型，支持三种策略：优先尝试usearch、强制使用usearch、强制使用精确扫描
-  vectorBackend: "usearch-first" | "usearch" | "exact-scan";
-  // 可选的usearch可用性探测函数，用于在usearch-first模式下检测usearch环境是否可用
-  probeUSearch?: () => Promise<boolean>;
-  // 可选的usearch后端实例创建函数，允许外部自定义usearch后端的初始化逻辑
-  createUSearchBackend?: () => VectorBackend;
+  // 指定优先使用的向量后端类型，支持三种策略：优先尝试hnswlib-wasm、强制使用hnswlib-wasm、强制使用精确扫描
+  vectorBackend: "hnswlib-wasm-first" | "hnswlib-wasm" | "exact-scan";
+  // 可选的hnswlib-wasm可用性探测函数，用于在hnswlib-wasm-first模式下检测wasm环境是否可用
+  probeHnswlib?: () => Promise<boolean>;
+  // 可选的hnswlib后端实例创建函数，允许外部自定义hnswlib后端的初始化逻辑
+  createHnswlibBackend?: () => VectorBackend;
 }

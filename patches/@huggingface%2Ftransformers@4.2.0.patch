@@ -1,0 +1,25 @@
+diff --git a/dist/transformers.node.mjs b/dist/transformers.node.mjs
+index bacb354fe1b898d4c535a39f5ef1ba5c6a463d75..85ce73e6765fe0412216ea48207cc1f8f87098b1 100644
+--- a/dist/transformers.node.mjs
++++ b/dist/transformers.node.mjs
+@@ -11550,6 +11550,11 @@ var ONNX;
+ var ORT_SYMBOL = /* @__PURE__ */ Symbol.for("onnxruntime");
+ if (ORT_SYMBOL in globalThis) {
+   ONNX = globalThis[ORT_SYMBOL];
++  // NOTE(experiment): official hook leaves supportedDevices empty in v4.2.0,
++  // breaking deviceToExecutionProviders for any device. Injected runtime
++  // (onnxruntime-web) only provides the wasm execution provider.
++  supportedDevices.push("wasm");
++  defaultDevices = ["wasm"];
+ } else if (apis.IS_NODE_ENV) {
+   ONNX = ONNX_NODE;
+   switch (process.platform) {
+@@ -12786,7 +12791,7 @@ var DEVICE_TYPES = Object.freeze({
+   "webnn-cpu": "webnn-cpu"
+   // WebNN CPU
+ });
+-var DEFAULT_DEVICE = apis.IS_NODE_ENV ? "cpu" : "wasm";
++var DEFAULT_DEVICE = apis.IS_NODE_ENV && !(ORT_SYMBOL in globalThis) ? "cpu" : "wasm";
+ function selectDevice(deviceConfig, fileName, { warn } = {}) {
+   if (!deviceConfig) return DEFAULT_DEVICE;
+   if (typeof deviceConfig === "string") return deviceConfig;

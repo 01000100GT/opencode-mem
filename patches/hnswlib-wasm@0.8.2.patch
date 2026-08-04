@@ -1,0 +1,16 @@
+diff --git a/dist/hnswlib.js b/dist/hnswlib.js
+index 717322088ca5ad12d4b72ec18d749fc0af41313a..a668d7d39515f13033debf145d9a0cbd52bff0a2 100644
+--- a/dist/hnswlib.js
++++ b/dist/hnswlib.js
+@@ -75,6 +75,11 @@ let __tla = (async () => {
+     if (EmscriptenFileSystemManager.isInitialized()) {
+       return;
+     }
++    if (fsType === "IDBFS" && typeof indexedDB === "undefined") {
++      // Node.js runtime without indexedDB: skip IDBFS persistence entirely.
++      // The index is rebuilt from sqlite on demand, so persistence is not needed.
++      return;
++    }
+     EmscriptenFileSystemManager.initializeFileSystem(fsType);
+     return await waitForFileSystemInitalized();
+   };

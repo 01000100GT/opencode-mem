@@ -3,14 +3,16 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDatabase } from "../../src/services/sqlite/sqlite-bootstrap.js";
-import { USearchBackend } from "../../src/services/vector-backends/usearch-backend.js";
+import { HnswlibWasmBackend } from "../../src/services/vector-backends/hnswlib-wasm-backend.js";
 import { removeTempDirs } from "../helpers/temp-dir.mjs";
 
-const Database = getDatabase();
-const canLoadUSearch = await import("usearch").then(() => true).catch(() => false);
-const itIfUSearchAvailable = canLoadUSearch ? it : it.skip;
+const Database = getDatabase() as unknown as new (filename?: string) => {
+  run(sql: string): unknown;
+  prepare(sql: string): { run(...params: unknown[]): unknown };
+  close(): void;
+};
 
-describe("USearchBackend", () => {
+describe("HnswlibWasmBackend", () => {
   const tempDirs: string[] = [];
   const databases: Array<{ close: () => void }> = [];
 
@@ -21,11 +23,11 @@ describe("USearchBackend", () => {
     await removeTempDirs(tempDirs);
   });
 
-  itIfUSearchAvailable("creates and searches an in-memory index", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "usearch-backend-"));
+  it("creates and searches an in-memory index", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hnswlib-backend-"));
     tempDirs.push(baseDir);
 
-    const backend = new USearchBackend({ baseDir, dimensions: 4 });
+    const backend = new HnswlibWasmBackend({ baseDir, dimensions: 4 });
 
     await backend.insertManyForTest("project_hash_0_content", [
       { id: "a", vector: new Float32Array([1, 0, 0, 0]) },
@@ -42,8 +44,8 @@ describe("USearchBackend", () => {
     expect(result.map((x) => x.id)).toEqual(["a", "c"]);
   });
 
-  itIfUSearchAvailable("supports public insert and search path", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "usearch-backend-public-"));
+  it("supports public insert and search path", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hnswlib-backend-public-"));
     tempDirs.push(baseDir);
 
     const shard = {
@@ -57,7 +59,7 @@ describe("USearchBackend", () => {
       createdAt: Date.now(),
     };
 
-    const backend = new USearchBackend({ baseDir, dimensions: 4 });
+    const backend = new HnswlibWasmBackend({ baseDir, dimensions: 4 });
     await backend.insert({
       id: "alpha",
       vector: new Float32Array([1, 0, 0, 0]),
@@ -76,51 +78,48 @@ describe("USearchBackend", () => {
     expect(result.map((x) => x.id)).toEqual(["alpha"]);
   });
 
-  itIfUSearchAvailable(
-    "updates an existing id instead of failing on duplicate insert",
-    async () => {
-      const baseDir = mkdtempSync(join(tmpdir(), "usearch-backend-upsert-"));
-      tempDirs.push(baseDir);
+  it("updates an existing id instead of failing on duplicate insert", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hnswlib-backend-upsert-"));
+    tempDirs.push(baseDir);
 
-      const shard = {
-        id: 1,
-        scope: "project" as const,
-        scopeHash: "hash",
-        shardIndex: 0,
-        dbPath: join(baseDir, "test.db"),
-        vectorCount: 1,
-        isActive: true,
-        createdAt: Date.now(),
-      };
+    const shard = {
+      id: 1,
+      scope: "project" as const,
+      scopeHash: "hash",
+      shardIndex: 0,
+      dbPath: join(baseDir, "test.db"),
+      vectorCount: 1,
+      isActive: true,
+      createdAt: Date.now(),
+    };
 
-      const backend = new USearchBackend({ baseDir, dimensions: 4 });
-      await backend.insert({
-        id: "alpha",
-        vector: new Float32Array([0, 1, 0, 0]),
-        shard,
-        kind: "content",
-      });
-      await backend.insert({
-        id: "alpha",
-        vector: new Float32Array([1, 0, 0, 0]),
-        shard,
-        kind: "content",
-      });
+    const backend = new HnswlibWasmBackend({ baseDir, dimensions: 4 });
+    await backend.insert({
+      id: "alpha",
+      vector: new Float32Array([0, 1, 0, 0]),
+      shard,
+      kind: "content",
+    });
+    await backend.insert({
+      id: "alpha",
+      vector: new Float32Array([1, 0, 0, 0]),
+      shard,
+      kind: "content",
+    });
 
-      const result = await backend.search({
-        db: null,
-        shard,
-        kind: "content",
-        queryVector: new Float32Array([1, 0, 0, 0]),
-        limit: 1,
-      });
+    const result = await backend.search({
+      db: null,
+      shard,
+      kind: "content",
+      queryVector: new Float32Array([1, 0, 0, 0]),
+      limit: 1,
+    });
 
-      expect(result.map((x) => x.id)).toEqual(["alpha"]);
-    }
-  );
+    expect(result.map((x) => x.id)).toEqual(["alpha"]);
+  });
 
-  itIfUSearchAvailable("rebuilds an index from sqlite rows", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "usearch-backend-rebuild-"));
+  it("rebuilds an index from sqlite rows", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "hnswlib-backend-rebuild-"));
     tempDirs.push(baseDir);
     const db = new Database(join(baseDir, "test.db"));
     databases.push(db);
@@ -142,7 +141,7 @@ describe("USearchBackend", () => {
       createdAt: Date.now(),
     };
 
-    const backend = new USearchBackend({ baseDir, dimensions: 4 });
+    const backend = new HnswlibWasmBackend({ baseDir, dimensions: 4 });
     await backend.rebuildFromShard({ db, shard, kind: "content" });
 
     const result = await backend.search({

@@ -4,7 +4,7 @@ import type { VectorBackend } from "../../src/services/vector-backends/types.js"
 
 function createThrowingBackend(method: "search" | "rebuildFromShard"): VectorBackend {
   return {
-    getBackendName: () => "usearch",
+    getBackendName: () => "hnswlib-wasm",
     insert: async () => {},
     insertBatch: async () => {},
     delete: async () => {},
@@ -22,47 +22,47 @@ function createThrowingBackend(method: "search" | "rebuildFromShard"): VectorBac
 }
 
 describe("vector backend factory", () => {
-  it("defaults to usearch-first strategy", async () => {
+  it("defaults to hnswlib-wasm-first strategy", async () => {
     const backend = await createVectorBackend({
-      vectorBackend: "usearch-first",
-      probeUSearch: async () => true,
+      vectorBackend: "hnswlib-wasm-first",
+      probeHnswlib: async () => true,
     });
 
-    expect(backend.getBackendName()).toBe("usearch");
+    expect(backend.getBackendName()).toBe("hnswlib-wasm");
   });
 
-  it("falls back to exact scan when usearch-first cannot load usearch", async () => {
+  it("falls back to exact scan when hnswlib-wasm-first cannot load hnswlib", async () => {
     const backend = await createVectorBackend({
-      vectorBackend: "usearch-first",
-      probeUSearch: async () => false,
-    });
-
-    expect(backend.getBackendName()).toBe("exact-scan");
-  });
-
-  it("uses usearch backend when requested and available", async () => {
-    const backend = await createVectorBackend({
-      vectorBackend: "usearch",
-      probeUSearch: async () => true,
-    });
-
-    expect(backend.getBackendName()).toBe("usearch");
-  });
-
-  it("falls back to exact scan when usearch is unavailable", async () => {
-    const backend = await createVectorBackend({
-      vectorBackend: "usearch",
-      probeUSearch: async () => false,
+      vectorBackend: "hnswlib-wasm-first",
+      probeHnswlib: async () => false,
     });
 
     expect(backend.getBackendName()).toBe("exact-scan");
   });
 
-  it("falls back to exact scan on usearch search failure", async () => {
+  it("uses hnswlib-wasm backend when requested and available", async () => {
     const backend = await createVectorBackend({
-      vectorBackend: "usearch-first",
-      probeUSearch: async () => true,
-      createUSearchBackend: () => createThrowingBackend("search"),
+      vectorBackend: "hnswlib-wasm",
+      probeHnswlib: async () => true,
+    });
+
+    expect(backend.getBackendName()).toBe("hnswlib-wasm");
+  });
+
+  it("falls back to exact scan when hnswlib-wasm is unavailable", async () => {
+    const backend = await createVectorBackend({
+      vectorBackend: "hnswlib-wasm",
+      probeHnswlib: async () => false,
+    });
+
+    expect(backend.getBackendName()).toBe("exact-scan");
+  });
+
+  it("falls back to exact scan on hnswlib search failure", async () => {
+    const backend = await createVectorBackend({
+      vectorBackend: "hnswlib-wasm-first",
+      probeHnswlib: async () => true,
+      createHnswlibBackend: () => createThrowingBackend("search"),
     });
 
     const result = await backend.search({
@@ -90,11 +90,11 @@ describe("vector backend factory", () => {
     expect(result).toEqual([]);
   });
 
-  it("falls back to exact scan on usearch rebuild failure", async () => {
+  it("falls back to exact scan on hnswlib rebuild failure", async () => {
     const backend = await createVectorBackend({
-      vectorBackend: "usearch-first",
-      probeUSearch: async () => true,
-      createUSearchBackend: () => createThrowingBackend("rebuildFromShard"),
+      vectorBackend: "hnswlib-wasm-first",
+      probeHnswlib: async () => true,
+      createHnswlibBackend: () => createThrowingBackend("rebuildFromShard"),
     });
 
     await expect(

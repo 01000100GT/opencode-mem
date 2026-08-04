@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Memory 工具完整闭环演示</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #0f0f0f;
+        color: #e0e0e0;
+        min-height: 100vh;
+        padding: 2rem;
+      }
+      h1 {
+        color: #fff;
+        margin-bottom: 0.5rem;
+        font-size: 1.8rem;
+      }
+      .subtitle {
+        color: #888;
+        margin-bottom: 2rem;
+        font-size: 0.9rem;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .flow-diagram {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin: 2rem 0;
+        padding: 1.5rem;
+        background: #1a1a1a;
+        border-radius: 12px;
+      }
+      .flow-step {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem 1.5rem;
+        border-radius: 8px;
+        font-weight: 600;
+      }
+      .flow-arrow {
+        color: #667eea;
+        font-size: 1.5rem;
+      }
+
+      .panel {
+        background: #1a1a1a;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+      .panel-title {
+        color: #fff;
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .panel-title .icon {
+        width: 24px;
+        height: 24px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+      }
+
+      .form-row {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+      }
+      input,
+      textarea,
+      select {
+        background: #2a2a2a;
+        border: 1px solid #333;
+        color: #e0e0e0;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        flex: 1;
+        min-width: 200px;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+      button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #fff;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: opacity 0.2s;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      button.secondary {
+        background: #333;
+      }
+
+      .result {
+        background: #0f0f0f;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        font-family: "Monaco", "Menlo", monospace;
+        font-size: 0.85rem;
+        max-height: 300px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .result.success {
+        border-left: 3px solid #4ade80;
+      }
+      .result.error {
+        border-left: 3px solid #f87171;
+      }
+
+      .timeline {
+        position: relative;
+        padding-left: 2rem;
+      }
+      .timeline::before {
+        content: "";
+        position: absolute;
+        left: 7px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: #333;
+      }
+      .timeline-item {
+        position: relative;
+        margin-bottom: 1.5rem;
+      }
+      .timeline-item::before {
+        content: "";
+        position: absolute;
+        left: -1.5rem;
+        top: 4px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #667eea;
+        border: 2px solid #1a1a1a;
+      }
+      .timeline-item.completed::before {
+        background: #4ade80;
+      }
+      .timeline-item.active::before {
+        background: #facc15;
+        animation: pulse 1.5s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.4);
+        }
+        50% {
+          box-shadow: 0 0 0 8px rgba(250, 204, 21, 0);
+        }
+      }
+
+      .timeline-title {
+        font-weight: 600;
+        color: #fff;
+        margin-bottom: 0.25rem;
+      }
+      .timeline-desc {
+        color: #888;
+        font-size: 0.85rem;
+      }
+
+      .status-bar {
+        display: flex;
+        gap: 2rem;
+        padding: 1rem;
+        background: #1a1a1a;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+      }
+      .status-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+      .status-label {
+        font-size: 0.75rem;
+        color: #888;
+        text-transform: uppercase;
+      }
+      .status-value {
+        font-weight: 600;
+      }
+      .status-value.ready {
+        color: #4ade80;
+      }
+      .status-value.not-ready {
+        color: #f87171;
+      }
+
+      .memory-list {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .memory-item {
+        background: #0f0f0f;
+        border-radius: 8px;
+        padding: 1rem;
+        border-left: 3px solid #667eea;
+      }
+      .memory-item.highlight {
+        border-left-color: #4ade80;
+        background: rgba(74, 222, 128, 0.05);
+      }
+      .memory-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: start;
+        margin-bottom: 0.5rem;
+      }
+      .memory-id {
+        font-size: 0.75rem;
+        color: #888;
+        font-family: monospace;
+      }
+      .memory-content {
+        color: #e0e0e0;
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+      .memory-meta {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .memory-tag {
+        background: #333;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        color: #aaa;
+      }
+
+      .code-block {
+        background: #0a0a0a;
+        border-radius: 8px;
+        padding: 1rem;
+        font-family: "Monaco", "Menlo", monospace;
+        font-size: 0.8rem;
+        overflow-x: auto;
+        margin-top: 1rem;
+      }
+      .code-block .comment {
+        color: #6a9955;
+      }
+      .code-block .keyword {
+        color: #c586c0;
+      }
+      .code-block .string {
+        color: #ce9178;
+      }
+      .code-block .function {
+        color: #dcdcaa;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Memory 工具完整闭环演示</h1>
+      <p class="subtitle">opencode-mem 记忆系统：add → search/list → session.idle writeback</p>
+
+      <!-- 流程图 -->
+      <div class="flow-diagram">
+        <div class="flow-step">1. memory add</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-step">2. memory search</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-step">3. memory list</div>
+        <span class="flow-arrow">→</span>
+        <div class="flow-step">4. session.idle writeback</div>
+        <span class="flow-arrow">→</span>
+        <div
+          class="flow-step"
+          style="background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%)"
+        >
+          闭环完成
+        </div>
+      </div>
+
+      <!-- 状态栏 -->
+      <div class="status-bar">
+        <div class="status-item">
+          <span class="status-label">系统状态</span>
+          <span class="status-value" id="sysStatus">检查中...</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">记忆总数</span>
+          <span class="status-value" id="memCount">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">最后操作</span>
+          <span class="status-value" id="lastOp">-</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">闭环状态</span>
+          <span class="status-value" id="loopStatus">-</span>
+        </div>
+      </div>
+
+      <!-- 时间线 -->
+      <div class="panel">
+        <div class="panel-title"><span class="icon">📍</span> 闭环流程时间线</div>
+        <div class="timeline">
+          <div class="timeline-item" id="step1">
+            <div class="timeline-title">Step 1: 添加记忆 (memory add)</div>
+            <div class="timeline-desc">使用 addMemory API 添加新的记忆到向量数据库</div>
+          </div>
+          <div class="timeline-item" id="step2">
+            <div class="timeline-title">Step 2: 搜索记忆 (memory search)</div>
+            <div class="timeline-desc">使用语义搜索从向量数据库检索相关记忆</div>
+          </div>
+          <div class="timeline-item" id="step3">
+            <div class="timeline-title">Step 3: 列出记忆 (memory list)</div>
+            <div class="timeline-desc">列出当前项目的所有记忆</div>
+          </div>
+          <div class="timeline-item" id="step4">
+            <div class="timeline-title">Step 4: Session Idle Writeback</div>
+            <div class="timeline-desc">session.idle 事件触发 checklist 写入记忆</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 添加记忆 -->
+      <div class="panel">
+        <div class="panel-title"><span class="icon">+</span> Step 1: 添加记忆</div>
+        <div class="form-row">
+          <input type="text" id="memContent" placeholder="输入记忆内容..." style="flex: 2" />
+          <input type="text" id="memTags" placeholder="标签 (逗号分隔)" />
+          <select id="memType">
+            <option value="learning">learning</option>
+            <option value="pattern">pattern</option>
+            <option value="fact">fact</option>
+            <option value="preference">preference</option>
+            <option value="architecture">architecture</option>
+            <option value="bug">bug</option>
+          </select>
+          <button onclick="addMemory()">添加</button>
+        </div>
+        <div id="addResult" class="result" style="display: none"></div>
+      </div>
+
+      <!-- 搜索记忆 -->
+      <div class="panel">
+        <div class="panel-title"><span class="icon">🔍</span> Step 2: 搜索记忆</div>
+        <div class="form-row">
+          <input type="text" id="searchQuery" placeholder="输入搜索关键词..." />
+          <select id="searchScope">
+            <option value="project">project</option>
+            <option value="all-projects">all-projects</option>
+          </select>
+          <button onclick="searchMemory()">搜索</button>
+        </div>
+        <div id="searchResult" class="result" style="display: none"></div>
+      </div>
+
+      <!-- 列出记忆 -->
+      <div class="panel">
+        <div class="panel-title"><span class="icon">📋</span> Step 3: 列出记忆</div>
+        <div class="form-row">
+          <input
+            type="number"
+            id="listLimit"
+            placeholder="限制数量"
+            value="10"
+            style="max-width: 120px"
+          />
+          <select id="listScope">
+            <option value="project">project</option>
+            <option value="all-projects">all-projects</option>
+          </select>
+          <button onclick="listMemories()" class="secondary">刷新列表</button>
+        </div>
+        <div id="memoryList" class="memory-list"></div>
+      </div>
+
+      <!-- Session Idle Writeback -->
+      <div class="panel">
+        <div class="panel-title"><span class="icon">🔄</span> Step 4: Session Idle Writeback</div>
+        <p style="color: #888; margin-bottom: 1rem; font-size: 0.9rem">
+          当会话空闲时，系统自动生成 checklist 并写入记忆。这是 completion-gate 机制的核心部分。
+        </p>
+        <div class="form-row">
+          <input type="text" id="sessionId" placeholder="Session ID" value="demo-session-1" />
+          <input type="text" id="promptId" placeholder="Prompt ID" value="prompt-demo-1" />
+          <button onclick="simulateIdle()">模拟 session.idle</button>
+        </div>
+        <div id="idleResult" class="result" style="display: none"></div>
+      </div>
+
+      <!-- API 示例代码 -->
+      <div class="panel">
+        <div class="panel-title"><span class="icon">📝</span> API 调用示例</div>
+        <div class="code-block">
+          <span class="comment">// 1. 添加记忆</span>
+          <span class="keyword">const</span> addRes =
+          <span class="keyword">await</span> memoryClient.<span class="function">addMemory</span>(
+          <span class="string">"这是一个重要的学习笔记"</span>,
+          <span class="string">"project/my-project"</span>, { type:
+          <span class="string">"learning"</span>, tags: [<span class="string">"react"</span>,
+          <span class="string">"hooks"</span>] } );
+
+          <span class="comment">// 2. 搜索记忆</span>
+          <span class="keyword">const</span> searchRes =
+          <span class="keyword">await</span> memoryClient.<span class="function"
+            >searchMemories</span
+          >( <span class="string">"react hooks best practices"</span>,
+          <span class="string">"project/my-project"</span>,
+          <span class="string">"project"</span>
+          );
+
+          <span class="comment">// 3. 列出记忆</span>
+          <span class="keyword">const</span> listRes =
+          <span class="keyword">await</span> memoryClient.<span class="function">listMemories</span
+          >( <span class="string">"project/my-project"</span>, <span class="number">20</span>,
+          <span class="string">"project"</span>
+          );
+
+          <span class="comment">// 4. session.idle writeback (自动触发)</span>
+          <span class="comment">// 当 session.idle 事件触发时，系统自动调用:</span>
+          <span class="keyword">await</span>
+          <span class="function">writeCompletionChecklistMemories</span>({ task: sanitizedTask,
+          sessionID: sessionID, promptId: promptId, containerTag: tags.project.tag, checklist:
+          checklistResult.checklist, memoryRefs: checklistResult.memoryRefs, evidence:
+          executionEvidence });
+        </div>
+      </div>
+
+      <!-- 闭环验证 -->
+      <div class="panel">
+        <div class="panel-title"><span class="icon">✅</span> 闭环验证</div>
+        <p style="color: #888; margin-bottom: 1rem; font-size: 0.9rem">
+          验证完整的 add → search → list → writeback 闭环是否正常工作。
+        </p>
+        <button onclick="runFullLoop()" id="loopBtn">运行完整闭环测试</button>
+        <div id="loopResult" class="result" style="display: none"></div>
+      </div>
+    </div>
+
+    <script>
+      // 状态管理
+      let state = {
+        initialized: false,
+        memories: [],
+        lastAddedId: null,
+        loopCompleted: false,
+      };
+
+      // 模拟 API 调用 (实际使用时替换为真实的 opencode-mem API)
+      const API_BASE = "/api/memory";
+
+      async function addMemory() {
+        const content = document.getElementById("memContent").value;
+        const tags = document.getElementById("memTags").value;
+        const type = document.getElementById("memType").value;
+
+        if (!content) {
+          showResult("addResult", { success: false, error: "内容不能为空" }, true);
+          return;
+        }
+
+        updateStep(1, "active");
+        showResult("addResult", { status: "添加中..." }, false);
+
+        try {
+          // 模拟 API 调用
+          const result = await mockAddMemory(content, tags, type);
+          state.lastAddedId = result.id;
+          state.memories.push(result);
+          updateStep(1, "completed");
+          showResult("addResult", result, true);
+          updateStatus();
+          document.getElementById("lastOp").textContent =
+            "add @ " + new Date().toLocaleTimeString();
+        } catch (e) {
+          showResult("addResult", { success: false, error: e.message }, true);
+        }
+      }
+
+      async function searchMemory() {
+        const query = document.getElementById("searchQuery").value;
+        const scope = document.getElementById("searchScope").value;
+
+        if (!query) {
+          showResult("searchResult", { success: false, error: "搜索词不能为空" }, true);
+          return;
+        }
+
+        updateStep(2, "active");
+        showResult("searchResult", { status: "搜索中..." }, false);
+
+        try {
+          const result = await mockSearchMemories(query, scope);
+          updateStep(2, "completed");
+          showResult("searchResult", result, true);
+          document.getElementById("lastOp").textContent =
+            "search @ " + new Date().toLocaleTimeString();
+        } catch (e) {
+          showResult("searchResult", { success: false, error: e.message }, true);
+        }
+      }
+
+      async function listMemories() {
+        const limit = parseInt(document.getElementById("listLimit").value) || 10;
+        const scope = document.getElementById("listScope").value;
+
+        updateStep(3, "active");
+
+        try {
+          const result = await mockListMemories(limit, scope);
+          state.memories = result.memories || [];
+          updateStep(3, "completed");
+          renderMemoryList(result.memories || []);
+          document.getElementById("lastOp").textContent =
+            "list @ " + new Date().toLocaleTimeString();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      async function simulateIdle() {
+        const sessionID = document.getElementById("sessionId").value;
+        const promptId = document.getElementById("promptId").value;
+
+        updateStep(4, "active");
+        showResult("idleResult", { status: "触发 session.idle writeback..." }, false);
+
+        try {
+          const result = await mockSessionIdleWriteback(sessionID, promptId);
+          updateStep(4, "completed");
+          showResult("idleResult", result, true);
+          state.loopCompleted = true;
+          updateStatus();
+          document.getElementById("lastOp").textContent =
+            "idle writeback @ " + new Date().toLocaleTimeString();
+        } catch (e) {
+          showResult("idleResult", { success: false, error: e.message }, true);
+        }
+      }
+
+      async function runFullLoop() {
+        const btn = document.getElementById("loopBtn");
+        btn.disabled = true;
+        btn.textContent = "运行中...";
+
+        const log = (msg) => {
+          const el = document.getElementById("loopResult");
+          el.style.display = "block";
+          el.textContent += msg + "\n";
+        };
+
+        try {
+          log("=== 开始完整闭环测试 ===\n");
+
+          // Step 1: Add
+          log("Step 1: 添加记忆...");
+          const addRes = await mockAddMemory(
+            "这是一个关于 TypeScript 泛型的高级学习笔记",
+            "typescript,generics,advanced",
+            "learning"
+          );
+          log(`  ✓ 添加成功: ${addRes.id}\n`);
+
+          // Step 2: Search
+          log("Step 2: 搜索记忆...");
+          const searchRes = await mockSearchMemories("TypeScript 泛型", "project");
+          log(`  ✓ 找到 ${searchRes.total} 条相关记忆\n`);
+
+          // Step 3: List
+          log("Step 3: 列出记忆...");
+          const listRes = await mockListMemories(10, "project");
+          log(`  ✓ 当前共有 ${listRes.total} 条记忆\n`);
+
+          // Step 4: Writeback
+          log("Step 4: Session Idle Writeback...");
+          const writebackRes = await mockSessionIdleWriteback("test-session", "test-prompt");
+          log(`  ✓ Writeback 完成: ${writebackRes.writtenMemoryIds?.length || 0} 条写入\n`);
+
+          log("=== 闭环测试完成 ✓ ===");
+          state.loopCompleted = true;
+          updateStatus();
+        } catch (e) {
+          log(`\n错误: ${e.message}`);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "运行完整闭环测试";
+        }
+      }
+
+      // 模拟函数 (实际使用时替换为真实 API)
+      function mockAddMemory(content, tags, type) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              success: true,
+              id: `mem_${Date.now()}`,
+              message: "Memory added",
+              tags: tags ? tags.split(",").map((t) => t.trim()) : [],
+            });
+          }, 300);
+        });
+      }
+
+      function mockSearchMemories(query, scope) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              success: true,
+              results: state.memories.filter(
+                (m) => m.content.includes(query) || query.includes("test")
+              ),
+              total: state.memories.length,
+              timing: 0,
+            });
+          }, 200);
+        });
+      }
+
+      function mockListMemories(limit, scope) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              success: true,
+              memories: state.memories.slice(0, limit),
+              total: state.memories.length,
+            });
+          }, 200);
+        });
+      }
+
+      function mockSessionIdleWriteback(sessionID, promptId) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              success: true,
+              skipped: false,
+              usedAI: true,
+              writtenMemoryIds: [`writeback_${Date.now()}`],
+              drafts: [{ content: "completion checklist writeback draft" }],
+              sessionID,
+              promptId,
+            });
+          }, 500);
+        });
+      }
+
+      // UI 辅助函数
+      function showResult(id, data, show) {
+        const el = document.getElementById(id);
+        el.style.display = show ? "block" : "none";
+        el.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+        el.className = "result " + (data.success !== false ? "success" : "error");
+      }
+
+      function updateStep(num, status) {
+        const el = document.getElementById(`step${num}`);
+        el.className = `timeline-item ${status}`;
+      }
+
+      function renderMemoryList(memories) {
+        const container = document.getElementById("memoryList");
+        if (memories.length === 0) {
+          container.innerHTML = '<p style="color: #888; text-align: center;">暂无记忆</p>';
+          return;
+        }
+        container.innerHTML = memories
+          .map(
+            (m) => `
+        <div class="memory-item ${m.id === state.lastAddedId ? "highlight" : ""}">
+          <div class="memory-header">
+            <span class="memory-id">${m.id}</span>
+            <span class="memory-tag">${m.type || "learning"}</span>
+          </div>
+          <div class="memory-content">${m.content || m.memory || ""}</div>
+          ${m.tags ? `<div class="memory-meta">${m.tags.map((t) => `<span class="memory-tag">${t}</span>`).join("")}</div>` : ""}
+        </div>
+      `
+          )
+          .join("");
+      }
+
+      function updateStatus() {
+        document.getElementById("sysStatus").textContent = "就绪";
+        document.getElementById("sysStatus").className = "status-value ready";
+        document.getElementById("memCount").textContent = state.memories.length;
+        document.getElementById("loopStatus").textContent = state.loopCompleted
+          ? "已完成"
+          : "进行中";
+        document.getElementById("loopStatus").className =
+          "status-value " + (state.loopCompleted ? "ready" : "");
+      }
+
+      // 初始化
+      listMemories();
+      updateStatus();
+    </script>
+  </body>
+</html>
