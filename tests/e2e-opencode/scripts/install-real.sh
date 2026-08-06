@@ -26,6 +26,72 @@ echo "→ plugin dist   : $PLUGIN_DIST"
 echo "→ global plugins: $GLOBAL_PLUGINS"
 echo "→ user config   : $USER_GLOBAL_CFG"
 
+# 0) 扫描项目内的 opencode-mem 配置: 项目级配置覆盖全局, 必须先排除干扰
+#    残留特征: 嵌入端点指向外部 (非内网) 或 autoCaptureEnabled=false
+#    不自动删除: 用户可能有意配置项目级覆盖, 仅提示让用户决策
+#    限定到常见项目根目录避免遍历全部 $HOME
+echo
+echo "→ 扫描项目级配置干扰..."
+PROJECT_CFG_CONFLICT=0
+# 仅扫描存在的目录, 避免 find 因路径不存在而异常
+# 把结果存入临时文件, 避免 here-string 在 set -e + pipefail 下被静默吃掉
+TMP_SCAN=$(mktemp)
+trap 'rm -f "$TMP_SCAN"' EXIT
+: > "$TMP_SCAN"
+# 精确扫描 /Users/sss/devprog/devprog_sss (已知用户项目根) - 避免全 $HOME 扫描卡顿
+# 深度 5: AI_MEMORY/opencode-mem/.opencode/file 刚好命中
+SCAN_ROOTS="/Users/sss/devprog/devprog_sss /Users/sss/Code /Users/sss/projects /Users/sss/work"
+for root in $SCAN_ROOTS; do
+  if [ -d "$root" ]; then
+    timeout 15 find "$root" -maxdepth 5 -name "opencode-mem.jsonc" -path "*/.opencode/*" 2>/dev/null >> "$TMP_SCAN" || true
+  fi
+done
+
+while IFS= read -r project_cfg; do
+  [ -z "$project_cfg" ] && continue
+  echo "  发现: $project_cfg"
+  # 检测残留特征: 外部 embedding 端点 或 autoCapture=false
+  is_residual="no"
+  if grep -qE 'embeddingApiUrl.*open\.bigmodel\.cn|embeddingApiUrl.*api\.openai\.com|embeddingApiUrl.*api\.deepseek\.com' "$project_cfg" 2>/dev/null; then
+    is_residual="yes"
+  fi
+  if grep -qE '"autoCaptureEnabled":[[:space:]]*false' "$project_cfg" 2>/dev/null; then
+    is_residual="yes"
+  fi
+  if [ "$is_residual" = "yes" ]; then
+    echo "    ⚠️  此配置可能是早期测试残留 (外部 embedding 端点 或 autoCapture 关闭)"
+    echo "    ⚠️  项目级配置会覆盖全局, 当前 opencode 加载时不会应用本次修改"
+    echo "    ⚠️  建议: mv $project_cfg ${project_cfg}.bak-residual"
+    PROJECT_CFG_CONFLICT=1
+  fi
+done < "$TMP_SCAN"
+
+if [ "$PROJECT_CFG_CONFLICT" -eq 1 ]; then
+  echo
+  echo "⚠️  检测到项目级配置干扰. 你想:"
+  echo "    a) 全部自动备份为 .bak-residual (推荐)"
+  echo "    b) 我来处理 (跳过)"
+  read -p "  请输入 a 或 b (默认 b): " choice
+  if [ "$choice" = "a" ]; then
+    while IFS= read -r project_cfg; do
+      [ -z "$project_cfg" ] && continue
+      is_residual="no"
+      if grep -qE 'embeddingApiUrl.*open\.bigmodel\.cn|embeddingApiUrl.*api\.openai\.com|embeddingApiUrl.*api\.deepseek\.com' "$project_cfg" 2>/dev/null; then
+        is_residual="yes"
+      fi
+      if grep -qE '"autoCaptureEnabled":[[:space:]]*false' "$project_cfg" 2>/dev/null; then
+        is_residual="yes"
+      fi
+      if [ "$is_residual" = "yes" ]; then
+        mv "$project_cfg" "${project_cfg}.bak-residual"
+        echo "    ✓ 已备份: $project_cfg → ${project_cfg}.bak-residual"
+      fi
+    done < "$TMP_SCAN"
+  else
+    echo "  跳过自动备份. 已知问题: 项目级配置将继续覆盖全局"
+  fi
+fi
+
 # 1) 备份用户当前配置
 if [ -f "$USER_GLOBAL_CFG" ]; then
   if [ ! -f "$BACKUP_CFG" ]; then
@@ -108,3 +174,7 @@ echo "  2. 验证: 在任意项目 cd 后, 第一次启动会看到:"
 echo "     - chat.message 触发 → TaskBrief + profile inject (看 opencode-mem.log)"
 echo "     - http://127.0.0.1:4747 可访问 (Web UI)"
 echo "  3. 如果想回退: cp $BACKUP_CFG $USER_GLOBAL_CFG && rm $GLOBAL_PLUGINS/opencode-mem.js"
+echo
+echo "⚠️  重要: 项目级配置覆盖全局. 如果本项目之前有 .opencode/opencode-mem.jsonc, 它会"
+echo "    屏蔽上面的全局修改. 安装脚本已扫描并提示, 请确认项目级配置已被清理 (或确认你"
+echo "    仍希望它覆盖全局)."
